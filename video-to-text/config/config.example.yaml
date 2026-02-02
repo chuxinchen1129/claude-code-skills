@@ -1,0 +1,99 @@
+# Video-to-Text 配置文件示例
+# 复制此文件为 config.yaml 并根据需要修改
+
+# Whisper API 配置
+api:
+  # OpenAI API Key（或使用 OPENAI_API_KEY 环境变量）
+  api_key: "${OPENAI_API_KEY}"
+
+  # 模型选择
+  # - whisper-1: 快速，成本较低
+  # - whisper-large-v3: 更准确，成本较高
+  model: "whisper-1"
+
+  # 语言设置
+  # - auto: 自动检测
+  # - zh: 中文
+  # - en: 英文
+  language: "zh"
+
+  # 温度参数（0.0 - 1.0，越低越确定性）
+  temperature: 0.0
+
+# 本地 Whisper 配置
+local:
+  # 模型大小
+  # - tiny: ~40MB，最快，准确度较低
+  # - base: ~80MB，快速，准确度中等（推荐）
+  # - small: ~250MB，中等速度，准确度较好
+  # - medium: ~770MB，较慢，准确度高
+  # - large: ~1.5GB，最慢，准确度最高
+  model_size: "base"
+
+  # 设备选择
+  # - cpu: 使用 CPU（默认）
+  # - cuda: 使用 GPU（需要 CUDA 支持）
+  device: "cpu"
+
+  # 计算类型
+  # - float32: 精度最高，内存占用大
+  # - float16: 平衡精度和速度
+  # - int8: 速度最快，精度略低
+  compute_type: "float32"
+
+  # 语言设置
+  language: "zh"
+
+  # 任务类型
+  # - transcribe: 转录
+  # - translate: 翻译为英文
+  task: "transcribe"
+
+# 输出配置
+output:
+  # 默认输出格式（支持多个）
+  # - txt: 纯文本
+  # - srt: SRT 字幕
+  # - vtt: VTT 字幕
+  # - json: JSON 格式（包含时间戳）
+  # - md: Markdown 格式（带时间戳）
+  formats:
+    - txt
+    - srt
+
+  # 输出目录（可选，默认与输入文件同目录）
+  directory: "./transcripts"
+
+  # 是否保留时间戳
+  timestamps: true
+
+  # 是否自动创建输出目录
+  create_directory: true
+
+# 处理配置
+processing:
+  # 大文件分块大小（MB，仅 API 模式）
+  chunk_size: 25
+
+  # 是否显示详细输出
+  verbose: true
+
+  # 是否自动清理临时文件
+  cleanup: true
+
+# 高级功能（实验性）
+advanced:
+  # 说话人识别（需要额外配置）
+  speaker_diarization: false
+
+  # 标点符号优化
+  punctuation: true
+
+  # 章节检测
+  chapter_detection: false
+
+  # 关键词提取
+  keyword_extraction: false
+
+  # 情感分析
+  sentiment_analysis: false
