@@ -1,0 +1,15 @@
+baoyu-xhs-images - 小红书图片生成
+baoyu-infographic - 信息图生成  
+baoyu-comic - 知识漫画
+baoyu-cover-image - 封面图生成
+baoyu-format-markdown - Markdown格式化
+baoyu-compress-image - 图片压缩
+baoyu-post-to-wechat - 发布到公众号
+baoyu-post-to-x - 发布到X(Twitter)
+baoyu-url-to-markdown - URL转Markdown
+baoyu-markdown-to-html - Markdown转HTML
+baoyu-article-illustrator - 文章配图
+baoyu-slide-deck - 幻灯片生成
+baoyu-image-gen - AI图片生成
+baoyu-danger-gemini-web - Gemini API
+baoyu-danger-x-to-markdown - X转Markdown

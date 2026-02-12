@@ -1,0 +1,689 @@
+#!/usr/bin/env python3
+"""
+飞书交互机器人服务器 v2.0
+接收飞书消息并执行相应操作
+
+功能：
+1. 链接采集（集成 MediaCrawler）
+2. 数据上传（集成 feishu-universal）
+3. 发送回复（飞书 API）
+"""
+
+import os
+import json
+import re
+import yaml
+import logging
+import subprocess
+import requests
+from datetime import datetime
+from pathlib import Path
+from flask import Flask, request, jsonify
+
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# 加载配置
+CONFIG_PATH = Path(__file__).parent.parent / "config" / "bot_config.yaml"
+SKILL_DIR = Path(__file__).parent.parent
+
+def load_config():
+    """加载配置文件"""
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    return {
+        'feishu': {
+            'app_id': os.getenv('FEISHU_APP_ID', ''),
+            'app_secret': os.getenv('FEISHU_APP_SECRET', ''),
+        },
+        'server': {
+            'host': '0.0.0.0',
+            'port': 5001
+        },
+        'data': {
+            'collection_dir': SKILL_DIR / 'data' / 'collections',
+            'log_dir': SKILL_DIR / 'logs'
+        }
+    }
+
+config = load_config()
+
+# 创建数据目录
+Path(config['data']['collection_dir']).mkdir(parents=True, exist_ok=True)
+Path(config['data']['log_dir']).mkdir(parents=True, exist_ok=True)
+
+# ============================================
+# Feishu API 集成
+# ============================================
+
+class FeishuAPI:
+    """飞书 API 客户端"""
+
+    def __init__(self):
+        self.app_id = config['feishu']['app_id']
+        self.app_secret = config['feishu']['app_secret']
+        self.base_url = "https://open.feishu.cn/open-apis"
+        self.app_access_token = None
+        self._get_app_token()
+
+    def _get_app_token(self):
+        """获取 app_access_token"""
+        url = f"{self.base_url}/auth/v3/app_access_token/internal"
+        payload = {
+            "app_id": self.app_id,
+            "app_secret": self.app_secret
+        }
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                self.app_access_token = data.get("app_access_token")
+                logger.info("✓ 获取 app_access_token 成功")
+            else:
+                logger.error(f"获取 token 失败: {data.get('msg')}")
+        else:
+            logger.error(f"请求失败: {response.status_code}")
+
+    def send_message(self, open_id, text):
+        """发送文本消息到飞书
+
+        Args:
+            open_id: 用户 open_id
+            text: 消息内容
+
+        Returns:
+            bool: 是否发送成功
+        """
+        if not self.app_access_token:
+            self._get_app_token()
+
+        url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+        headers = {
+            "Authorization": f"Bearer {self.app_access_token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "receive_id": open_id,
+            "msg_type": "text",
+            "content": json.dumps({"text": text})
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("code") == 0:
+                    logger.info(f"✓ 消息已发送到 {open_id}")
+                    return True
+                else:
+                    logger.error(f"发送失败 code={data.get('code')}: {data.get('msg')}")
+                    # 打印完整响应用于调试
+                    logger.error(f"完整响应: {data}")
+            else:
+                logger.error(f"请求失败: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"发送消息异常: {e}")
+
+        return False
+
+# 初始化 Feishu API
+feishu_api = FeishuAPI()
+
+# ============================================
+# MediaCrawler 集成
+# ============================================
+
+class MediaCrawlerClient:
+    """MediaCrawler 客户端"""
+
+    def __init__(self):
+        self.mediacrawler_dir = Path.home() / "MediaCrawler"
+        self.venv_python = self.mediacrawler_dir / ".venv" / "bin" / "python"
+        self.config_file = self.mediacrawler_dir / "config" / "base_config.py"
+
+    def collect_by_keyword(self, keyword, count=20):
+        """通过关键词采集
+
+        Args:
+            keyword: 关键词
+            count: 采集数量
+
+        Returns:
+            dict: 采集结果
+        """
+        logger.info(f"启动 MediaCrawler 采集: {keyword}, 数量: {count}")
+
+        # 准备输出目录
+        output_dir = Path(config['data']['collection_dir']) / datetime.now().strftime('%Y-%m-%d')
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 调用 MediaCrawler skill
+        try:
+            skill_script = Path.home() / ".claude" / "skills" / "media-crawler" / "scripts" / "run_crawler.py"
+
+            if not skill_script.exists():
+                return {
+                    'success': False,
+                    'error': 'MediaCrawler skill 不存在'
+                }
+
+            # 构建命令
+            cmd = [
+                str(skill_script),
+                '--keyword', keyword,
+                '--count', str(count),
+                '--output', str(output_dir)
+            ]
+
+            logger.info(f"执行命令: {' '.join(cmd)}")
+
+            # 执行采集（后台运行）
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10分钟超时
+            )
+
+            if result.returncode == 0:
+                logger.info("✓ MediaCrawler 执行成功")
+                return {
+                    'success': True,
+                    'output_dir': str(output_dir),
+                    'keyword': keyword,
+                    'count': count
+                }
+            else:
+                logger.error(f"MediaCrawler 执行失败: {result.stderr}")
+                return {
+                    'success': False,
+                    'error': result.stderr
+                }
+
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': '采集超时（10分钟）'
+            }
+        except Exception as e:
+            logger.error(f"采集异常: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+# 初始化 MediaCrawler 客户端
+mediacrawler_client = MediaCrawlerClient()
+
+# ============================================
+# Universal Crawler 集成
+# ============================================
+
+class UniversalCrawlerClient:
+    """通用爬虫客户端 - 用于微信文章等"""
+
+    def __init__(self):
+        self.skill_dir = SKILL_DIR
+        self.crawl_script = self.skill_dir / "scripts" / "crawl_wechat.py"
+
+    def crawl_wechat_article(self, url):
+        """爬取微信公众号文章
+
+        Args:
+            url: 文章链接
+
+        Returns:
+            dict: 爬取结果
+        """
+        logger.info(f"启动微信文章爬取: {url}")
+
+        # 准备输出目录
+        output_dir = Path(config['data']['collection_dir']) / datetime.now().strftime('%Y-%m-%d')
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 生成输出文件名
+        timestamp = datetime.now().strftime('%H%M%S')
+        output_file = output_dir / f"wechat_{timestamp}.md"
+
+        try:
+            # 检查爬虫脚本是否存在
+            if not self.crawl_script.exists():
+                return {
+                    'success': False,
+                    'error': 'crawl_wechat.py 脚本不存在'
+                }
+
+            # 注意：实际爬取需要 web_reader MCP 工具
+            # 这里保存链接供后续处理
+            link_file = output_dir / f"wechat_links_{timestamp}.txt"
+            with open(link_file, 'a', encoding='utf-8') as f:
+                f.write(f"{url}\n")
+
+            logger.info(f"微信链接已保存到: {link_file}")
+
+            return {
+                'success': True,
+                'url': url,
+                'link_file': str(link_file),
+                'message': '微信链接已保存，等待处理'
+            }
+
+        except Exception as e:
+            logger.error(f"微信文章爬取异常: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+# 初始化 Universal Crawler 客户端
+universal_crawler_client = UniversalCrawlerClient()
+
+# ============================================
+# 消息处理逻辑
+# ============================================
+
+class MessageHandler:
+    """消息处理器"""
+
+    def __init__(self):
+        self.handlers = {
+            'url': self.handle_url,
+            'collect': self.handle_collect,
+            'upload': self.handle_upload,
+            'status': self.handle_status,
+            'help': self.handle_help,
+            'ping': self.handle_ping
+        }
+
+    def process(self, message_text, user_open_id):
+        """处理消息
+
+        Args:
+            message_text: 消息文本
+            user_open_id: 用户 open_id
+
+        Returns:
+            str: 回复文本
+        """
+        message_text = message_text.strip()
+
+        # 检测链接
+        if self.is_url(message_text):
+            return self.handle_url(message_text, user_open_id)
+
+        # 检测命令
+        if message_text.startswith('采集：') or message_text.startswith('采集:'):
+            keyword = message_text.split(':', 1)[1].strip()
+            return self.handle_collect(keyword, user_open_id)
+
+        if message_text.startswith('上传') or message_text == 'upload':
+            return self.handle_upload(user_open_id)
+
+        if message_text in ['查看状态', 'status', '最近采集', '统计']:
+            return self.handle_status(user_open_id)
+
+        if message_text in ['help', '帮助', '?']:
+            return self.handle_help()
+
+        if message_text == 'ping':
+            return self.handle_ping(user_open_id)
+
+        # 无法识别
+        return self.handle_unknown(message_text, user_open_id)
+
+    def is_url(self, text):
+        """检测是否为URL"""
+        url_pattern = r'https?://(xhs\.com|xiaohongshu\.com|mp\.weixin\.qq\.com|v\.douyin\.com)'
+        return bool(re.search(url_pattern, text))
+
+    def handle_url(self, url, user_open_id):
+        """处理链接采集 - 实际采集"""
+        logger.info(f"处理链接采集: {url}")
+
+        # 识别平台
+        if 'xhs.com' in url or 'xiaohongshu.com' in url:
+            platform = '小红书'
+            crawler_type = 'mediacrawler'
+        elif 'mp.weixin.qq.com' in url:
+            platform = '微信公众号'
+            crawler_type = 'universal'
+        elif 'douyin.com' in url:
+            platform = '抖音'
+            crawler_type = 'mediacrawler'
+        else:
+            return f"❓ 暂不支持该平台\n\n支持的平台：小红书、微信公众号、抖音"
+
+        # 启动后台采集
+        response = f"""✅ 收到链接
+
+平台：{platform}
+链接：{url}
+
+正在启动采集...
+"""
+
+        # 发送初步回复
+        feishu_api.send_message(user_open_id, response)
+
+        # 后台执行采集
+        try:
+            # 创建采集任务
+            output_dir = Path(config['data']['collection_dir']) / datetime.now().strftime('%Y-%m-%d')
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            if crawler_type == 'universal':
+                # 使用 Universal Crawler 处理微信文章
+                logger.info("使用 Universal Crawler 处理微信文章")
+                result = universal_crawler_client.crawl_wechat_article(url)
+
+                if result.get('success'):
+                    followup = f"""
+✅ 微信链接已记录
+
+已保存到：{result.get('link_file', '未知')}
+
+💡 提示：
+- 链接已保存，等待处理
+- 可以使用"上传到飞书"查看已记录的链接
+- 或在 Claude Code 中使用 universal-crawler 技能处理
+"""
+                else:
+                    followup = f"""
+❌ 处理失败
+
+错误：{result.get('error', '未知错误')}
+
+💡 建议：
+- 检查链接格式是否正确
+- 稍后重试
+"""
+                feishu_api.send_message(user_open_id, followup)
+
+            else:
+                # MediaCrawler 处理其他平台（小红书、抖音）
+                # 保存链接到文件
+                link_file = output_dir / f"links_{datetime.now().strftime('%H%M%S')}.txt"
+                with open(link_file, 'w') as f:
+                    f.write(f"{url}\n")
+
+                followup = f"""
+✅ 链接已记录
+
+平台：{platform}
+已保存到：{link_file}
+
+💡 提示：
+- 链接已保存，等待处理
+- 可以使用"上传到飞书"查看已记录的链接
+- 或在 Claude Code 中使用 media-crawler 技能采集
+"""
+                feishu_api.send_message(user_open_id, followup)
+
+        except Exception as e:
+            logger.error(f"处理链接失败: {e}")
+            feishu_api.send_message(user_open_id, f"❌ 处理失败: {str(e)}")
+
+        return response
+
+    def handle_collect(self, keyword_params, user_open_id):
+        """处理关键词采集 - 实际采集"""
+        logger.info(f"处理关键词采集: {keyword_params}")
+
+        # 解析参数
+        parts = keyword_params.split()
+        keyword = parts[0]
+        count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 20
+
+        # 发送开始消息
+        start_msg = f"""✅ 开始采集
+
+关键词：{keyword}
+数量：{count}条
+平台：小红书
+
+正在启动 MediaCrawler...
+"""
+        feishu_api.send_message(user_open_id, start_msg)
+
+        # 执行采集
+        result = mediacrawler_client.collect_by_keyword(keyword, count)
+
+        if result.get('success'):
+            success_msg = f"""✅ 采集完成！
+
+关键词：{keyword}
+获得数据：{count} 条
+保存位置：{result.get('output_dir')}
+
+💡 提示：
+- 使用"上传到飞书"将数据上传到表格
+- 数据已准备好可导入
+"""
+            feishu_api.send_message(user_open_id, success_msg)
+        else:
+            error_msg = f"""❌ 采集失败
+
+错误：{result.get('error', '未知错误')}
+
+💡 建议：
+1. 检查 MediaCrawler 登录状态
+2. 确认关键词是否正确
+3. 查看采集日志
+"""
+            feishu_api.send_message(user_open_id, error_msg)
+
+        return start_msg
+
+    def handle_upload(self, user_open_id):
+        """处理数据上传"""
+        logger.info("处理数据上传")
+
+        # 检查最新采集结果
+        collection_dir = Path(config['data']['collection_dir'])
+        latest_dir = sorted(collection_dir.iterdir(), reverse=True)[:1]
+
+        if not latest_dir:
+            msg = """❌ 没有找到采集数据
+
+💡 请先采集数据：
+- 发送链接
+- 或使用"采集：关键词 数量\""""
+            feishu_api.send_message(user_open_id, msg)
+            return msg
+
+        latest_dir = latest_dir[0]
+
+        # 查找数据文件
+        data_files = list(latest_dir.glob("*.xlsx")) + list(latest_dir.glob("*.json"))
+
+        if not data_files:
+            msg = f"""❌ 没有找到数据文件
+
+目录：{latest_dir}
+"""
+            feishu_api.send_message(user_open_id, msg)
+            return msg
+
+        # 上传逻辑
+        upload_msg = f"""✅ 正在上传...
+
+找到 {len(data_files)} 个数据文件
+
+💡 提示：
+- 目前需要手动在 Claude Code 中使用 feishu-universal 技能上传
+- 或告诉我你要上传到哪个表格
+"""
+        feishu_api.send_message(user_open_id, upload_msg)
+
+        return upload_msg
+
+    def handle_status(self, user_open_id):
+        """处理状态查询"""
+        logger.info("处理状态查询")
+
+        # 检查采集目录
+        collection_dir = Path(config['data']['collection_dir'])
+        collections = sorted(collection_dir.iterdir(), reverse=True)[:5]
+
+        status_lines = ["📊 系统状态\n", "最近采集："]
+
+        if collections:
+            for coll in collections:
+                files = list(coll.glob("*"))
+                status_lines.append(f"• {coll.name} - {len(files)} 个文件")
+        else:
+            status_lines.append("• 暂无采集数据")
+
+        status_lines.append(f"\n✓ 服务运行正常")
+        status_lines.append(f"• 时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        msg = "\n".join(status_lines)
+        feishu_api.send_message(user_open_id, msg)
+
+        return msg
+
+    def handle_help(self, user_open_id=None):
+        """处理帮助"""
+        msg = """🤖 飞书机器人使用指南
+
+📌 链接采集
+直接发送链接即可：
+• 小红书：https://xhs.com/explore/...
+• 微信公众号：https://mp.weixin.qq.com/s/...
+• 抖音：https://v.douyin.com/...
+
+📌 关键词采集
+采集：关键词 [数量]
+例：采集：睡眠仪 50
+
+📌 数据上传
+上传到飞书
+
+📌 状态查询
+查看状态 | 最近采集 | 统计
+
+💡 提示：发送"ping"测试连接"""
+
+        if user_open_id:
+            feishu_api.send_message(user_open_id, msg)
+
+        return msg
+
+    def handle_ping(self, user_open_id):
+        """处理ping"""
+        msg = f"""🏓 Pong!
+
+✅ 机器人正常运行
+时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        feishu_api.send_message(user_open_id, msg)
+
+        return msg
+
+    def handle_unknown(self, message, user_open_id):
+        """处理未知命令"""
+        msg = f"""❓ 无法识别命令：{message}
+
+💡 发送"help"查看使用指南"""
+
+        feishu_api.send_message(user_open_id, msg)
+
+        return msg
+
+# 初始化消息处理器
+handler = MessageHandler()
+
+# ============================================
+# Flask 路由
+# ============================================
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    """健康检查"""
+    return jsonify({
+        'status': 'ok',
+        'service': 'feishu-bot',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """接收飞书消息"""
+    try:
+        data = request.get_json()
+        logger.info(f"收到消息: {json.dumps(data, ensure_ascii=False)[:200]}")
+
+        # URL 验证
+        if data.get('type') == 'url_verification':
+            return jsonify({'challenge': data.get('challenge')})
+
+        # 提取事件和消息
+        event = data.get('event', {})
+        sender = event.get('sender', {})
+        sender_id = sender.get('sender_id', {})
+        user_open_id = sender_id.get('open_id', '')
+
+        # 检查消息类型
+        message = event.get('message', {})
+        msg_type = message.get('msg_type')
+
+        if msg_type == 'text':
+            content = json.loads(message.get('content', '{}'))
+            text = content.get('text', '')
+
+            logger.info(f"用户 {user_open_id} 发送: {text}")
+
+            # 处理消息（会自动发送回复）
+            handler.process(text, user_open_id)
+
+            # 记录到日志
+            log_file = Path(config['data']['log_dir']) / f"messages_{datetime.now().strftime('%Y%m%d')}.log"
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now().isoformat()} - {user_open_id} - {text}\n")
+
+            return jsonify({'code': 0, 'msg': 'success'})
+
+        return jsonify({'code': 0, 'msg': 'not text message'})
+
+    except Exception as e:
+        logger.error(f"处理消息失败: {e}", exc_info=True)
+        return jsonify({'code': 500, 'msg': str(e)}), 500
+
+# ============================================
+# 主函数
+# ============================================
+
+def main():
+    """启动服务器"""
+    host = config['server'].get('host', '0.0.0.0')
+    port = config['server'].get('port', 5001)
+
+    logger.info(f"启动飞书机器人服务器: {host}:{port}")
+    logger.info("Webhook URL: http://{}:{}/webhook".format(host, port))
+
+    print(f"""
+    ╔══════════════════════════════════════╗
+    ║   飞书交互机器人服务器已启动 v2.0      ║
+    ╠══════════════════════════════════════╣
+    ║  地址: http://{host}:{port}           ║
+    ║  Webhook: /webhook                   ║
+    ║                                      ║
+    ║  ✨ 新功能：                        ║
+    ║  • 实际采集数据                    ║
+    ║  • 发送回复到飞书                   ║
+    ║  • 集成 MediaCrawler               ║
+    ║                                      ║
+    ╚══════════════════════════════════════╝
+    """)
+
+    app.run(host=host, port=port, debug=config['server'].get('debug', False))
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,35 @@
+# 飞书交互机器人配置文件
+
+# 飞书配置
+feishu:
+  app_id: "cli_a9d0ce936278dced"  # 飞书应用ID
+  app_secret: "OSDjdk36qaGZ0xzD7TXmgb5kmuRneuZy"  # 飞书应用Secret
+  encrypt_key: ""  # 可选，启用加密时填写
+  verification_token: ""  # 可选，验证令牌
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 5001
+  debug: false
+
+# 技能路径
+skills:
+  media_crawler: "~/.claude/skills/media-crawler"
+  feishu_universal: "~/.claude/skills/feishu-universal"
+  wuxin_collector: "~/.claude/skills/wuxin-sleep-hotspot-collector"
+
+# 数据存储
+data:
+  collection_dir: "~/.claude/skills/feishu-bot/data/collections"
+  log_dir: "~/.claude/skills/feishu-bot/logs"
+
+# MediaCrawler配置
+mediacrawler:
+  python_path: "~/MediaCrawler/.venv/bin/python"
+  main_script: "~/MediaCrawler/main.py"
+
+# 默认参数
+defaults:
+  collection_count: 20  # 默认采集数量
+  max_queue_size: 10    # 最大队列大小

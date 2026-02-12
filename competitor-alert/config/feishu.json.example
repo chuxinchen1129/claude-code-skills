@@ -1,0 +1,6 @@
+{
+  "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxxxxxxxxxx",
+  "app_id": "cli_xxxxxxxxxxxxx",
+  "app_secret": "xxxxxxxxxxxxxxxxxxxx",
+  "chat_id": "oc_xxxxxxxxxxxxxxxx"
+}
