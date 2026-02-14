@@ -130,4 +130,29 @@ def test_notification():
 
 
 if __name__ == "__main__":
-    test_notification()
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description='飞书机器人通知工具')
+    parser.add_argument('--message', '-m', help='要发送的消息内容')
+    parser.add_argument('--test', '-t', action='store_true', help='发送测试消息')
+
+    args = parser.parse_args()
+
+    if args.message:
+        # 发送指定消息
+        try:
+            notifier = FeishuBotNotifier()
+            success = notifier.send_message(args.message)
+            if success:
+                print("✅ 消息已发送")
+                sys.exit(0)
+            else:
+                print("❌ 消息发送失败")
+                sys.exit(1)
+        except Exception as e:
+            print(f"❌ 错误: {e}")
+            sys.exit(1)
+    else:
+        # 默认发送测试消息
+        test_notification()
