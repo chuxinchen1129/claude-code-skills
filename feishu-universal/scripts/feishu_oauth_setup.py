@@ -26,7 +26,7 @@ APP_SECRET = "OSDjdk36qaGZ0xzD7TXmgb5kmuRneuZy"
 REDIRECT_URI = "http://localhost:8080/callback"
 
 # 权限范围
-SCOPE = "contact:user.base:readonly bitable:app drive:drive im:message"
+SCOPE = "contact:user.base:readonly bitable:app drive:drive im:message im:message:group_msg:get_as_user im:chat im:chat:readonly"
 
 
 class CallbackHandler(BaseHTTPRequestHandler):

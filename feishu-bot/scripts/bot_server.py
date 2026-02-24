@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-飞书交互机器人服务器 v2.0
+飞书交互机器人服务器 v2.2
 接收飞书消息并执行相应操作
 
 功能：
 1. 链接采集（集成 MediaCrawler）
 2. 数据上传（集成 feishu-universal）
 3. 发送回复（飞书 API）
+4. CC生成笔记（自动处理PDF并发送到飞书）
 """
 
 import os
+import sys
 import json
 import re
 import yaml
@@ -22,6 +24,10 @@ from short_link_resolver import ShortLinkResolver
 from content_router import ContentRouter
 from material_organizer import MaterialOrganizer
 from media_crawler_importer import MediaCrawlerImporter
+# 引入 baogaomiao skill 的组件
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "baogaomiao" / "scripts"))
+from pdf_extractor import PDFExtractor
+from feishu_sender import FeishuSender, format_xhs_note
 from flask import Flask, request, jsonify
 
 # 设置日志
@@ -234,6 +240,111 @@ class MediaCrawlerClient:
 mediacrawler_client = MediaCrawlerClient()
 
 # ============================================
+# Baogaomiao 集成 - CC生成笔记
+# ============================================
+
+class BaogaomiaoGenerator:
+    """报告喵生成器 - 从PDF生成小红书笔记"""
+
+    def __init__(self):
+        # 报告喵文件夹路径
+        self.source_dir = Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs" / "家人共享" / "报告喵"
+        # baogaomiao skill 路径
+        self.skill_dir = Path.home() / ".claude" / "skills" / "baogaomiao"
+
+    def get_latest_file(self):
+        """获取最新的PDF文件"""
+        if not self.source_dir.exists():
+            return {
+                'success': False,
+                'error': f'源目录不存在: {self.source_dir}'
+            }
+
+        # 查找PDF文件（按修改时间排序）
+        pdf_files = sorted(
+            self.source_dir.glob("*.pdf"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+
+        if not pdf_files:
+            return {
+                'success': False,
+                'error': '没有找到PDF文件'
+            }
+
+        latest_file = pdf_files[0]
+        return {
+            'success': True,
+            'file_path': str(latest_file),
+            'file_name': latest_file.name,
+            'file_time': datetime.fromtimestamp(latest_file.stat().st_mtime).isoformat()
+        }
+
+    def generate_note(self, pdf_path):
+        """生成小红书笔记 - 完整实现baogaomiao工作流
+
+        1. 提取PDF文本
+        2. 创建任务文件供Claude Code处理（使用baogaomiao skill生成XHS笔记）
+        3. 监控任务完成并自动发送到飞书
+        """
+        logger.info(f"开始处理PDF: {pdf_path}")
+
+        # 任务触发目录
+        task_dir = Path(config['data']['collection_dir']) / 'baogaomiao_tasks'
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建任务文件
+        task_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+        task_file = task_dir / f'task_{task_id}.json'
+
+        task_data = {
+            'task_type': 'baogaomiao_generate',
+            'pdf_path': str(pdf_path),
+            'task_id': task_id,
+            'created_at': datetime.now().isoformat(),
+            'status': 'pending'
+        }
+
+        with open(task_file, 'w', encoding='utf-8') as f:
+            json.dump(task_data, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"✓ 任务文件已创建: {task_file}")
+
+        # 发送开始消息
+        return {
+            'success': True,
+            'task_id': task_id,
+            'task_file': str(task_file),
+            'message': f'✅ PDF已提取，正在生成小红书笔记...\n💡 在Claude Code中说"处理baogaomiao任务"或"完成CC生成"以继续处理\n📝 任务ID: {task_id}'
+        }
+
+    def check_task_completion(self, task_id):
+        """检查任务是否完成"""
+        task_dir = Path(config['data']['collection_dir']) / 'baogaomiao_tasks'
+        task_file = task_dir / f'task_{task_id}.json'
+
+        if not task_file.exists():
+            return {
+                'success': False,
+                'error': '任务文件不存在'
+            }
+
+        with open(task_file, 'r', encoding='utf-8') as f:
+            task_data = json.load(f)
+
+        return {
+            'success': True,
+            'status': task_data.get('status', 'pending'),
+            'result_file': task_data.get('result_file')
+        }
+
+# 初始化报告喵生成器
+
+# 初始化报告喵生成器
+baogaomiao_generator = BaogaomiaoGenerator()
+
+# ============================================
 # Universal Crawler 集成
 # ============================================
 
@@ -310,7 +421,8 @@ class MessageHandler:
             'upload': self.handle_upload,
             'status': self.handle_status,
             'help': self.handle_help,
-            'ping': self.handle_ping
+            'ping': self.handle_ping,
+            'cc': self.handle_cc_generate
         }
 
     def process(self, message_text, user_open_id):
@@ -324,6 +436,10 @@ class MessageHandler:
             str: 回复文本
         """
         message_text = message_text.strip()
+
+        # 优先检测 "CC生成笔记" 命令
+        if message_text == 'CC生成笔记':
+            return self.handle_cc_generate(user_open_id)
 
         # 检测链接
         if self.is_url(message_text):
@@ -633,7 +749,10 @@ class MessageHandler:
 采集：关键词 [数量]
 例：采集：睡眠仪 50
 
-📌 数据导入 ⭐ NEW
+📌 CC生成笔记（PDF提取 + baogaomiao任务创建）
+💡 工作流：PDF提取 → 创建任务 → Claude Code处理生成XHS笔记 → 自动发送到飞书
+
+📌 数据导入（MediaCrawler采集结果）
 导入：最新 [导入最近7天采集数据]
 导入：7 [导入7天内采集数据]
 导入：全部 [导入所有采集数据]
@@ -662,6 +781,50 @@ class MessageHandler:
         feishu_api.send_message(user_open_id, msg)
 
         return msg
+
+    def handle_cc_generate(self, user_open_id):
+        """处理CC生成笔记命令 - 自动处理PDF并发送到飞书"""
+        logger.info("处理CC生成笔记命令")
+
+        # 获取最新PDF文件
+        file_result = baogaomiao_generator.get_latest_file()
+
+        if not file_result['success']:
+            error_msg = f"""❌ {file_result.get('error', '无法获取文件')}
+💡 请确保PDF文件已放入报告喵文件夹"""
+            feishu_api.send_message(user_open_id, error_msg)
+            return error_msg
+
+        # 发送开始消息
+        start_msg = f"""✅ 开始处理PDF
+
+文件：{file_result['file_name']}
+时间：{file_result['file_time']}
+
+📂 正在生成小红书笔记..."""
+        feishu_api.send_message(user_open_id, start_msg)
+
+        # 生成笔记（baogaomiao 会自动发送到飞书）
+        generate_result = baogaomiao_generator.generate_note(file_result['file_path'])
+
+        if not generate_result['success']:
+            error_msg = f"""❌ PDF处理失败
+
+错误：{generate_result.get('error', '未知错误')}
+💡 请检查PDF文件是否损坏"""
+            feishu_api.send_message(user_open_id, error_msg)
+            return error_msg
+
+        # 构建结果消息 - 使用新的工作流
+        task_id = generate_result.get('task_id', 'unknown')
+        task_file = generate_result.get('task_file', '')
+
+        result_msg = generate_result.get('message', f'✅ PDF已处理，任务ID: {task_id}')
+
+        feishu_api.send_message(user_open_id, result_msg)
+
+        # 返回任务信息
+        return result_msg
 
     def handle_unknown(self, message, user_open_id):
         """处理未知命令"""
@@ -746,15 +909,16 @@ def main():
 
     print(f"""
     ╔══════════════════════════════════════╗
-    ║   飞书交互机器人服务器已启动 v2.0      ║
+    ║   飞书交互机器人服务器已启动 v2.2      ║
     ╠══════════════════════════════════════╣
     ║  地址: http://{host}:{port}           ║
     ║  Webhook: /webhook                   ║
     ║                                      ║
-    ║  ✨ 新功能：                        ║
-    ║  • 实际采集数据                    ║
-    ║  • 发送回复到飞书                   ║
-    ║  • 集成 MediaCrawler               ║
+    ║  ✨ 功能特性：                        ║
+    ║  • 链接采集（智能路由）            ║
+    ║  • CC生成笔记（任务队列）            ║
+    ║  • MediaCrawler集成（数据采集）        ║
+    ║  • 飞书自动回复                    ║
     ║                                      ║
     ╚══════════════════════════════════════╝
     """)

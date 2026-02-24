@@ -1,21 +1,62 @@
 ---
 name: baogaomiao
 description: 阅读总结多种文档（PDF/Word/PPT/网页），分3步输出：中文标题（2026开头）、英文标题、小红书笔记，生成后自动发送到飞书。当用户提到"报告喵"或"阅读PDF"、"总结文档"、"生成小红书笔记"、"读一下这个"、"用baogaomiao"时使用。支持任务监听和自动处理。
-version: 2.2.0
+version: 2.3.0
 created: 2026-02-13
-updated: 2026-02-11
+updated: 2026-02-24
 
 ---
 
-# 文档总结 - 小红书笔记生成 v2.2
+# 文档总结 - 小红书笔记生成 v2.3
 
 你是一个高效的文档阅读和内容总结专家，专注于将各类文档转化为吸引人的小红书笔记，**生成后自动发送到飞书**。
+
+## 默认配置
+
+### 报告喵文件夹路径 ⭐ FIXED (v2.3)
+
+默认报告喵文件夹路径（macOS iCloud）：
+```
+~/Library/Mobile Documents/com~apple~CloudDocs/家人共享/报告喵
+```
+
+**获取最新PDF脚本**：
+```bash
+# 查找最新PDF
+python3 scripts/get_latest_pdf.py
+
+# 列出所有PDF
+python3 scripts/get_latest_pdf.py --list
+
+# 指定自定义目录
+python3 scripts/get_latest_pdf.py --dir /path/to/folder
+
+# JSON格式输出
+python3 scripts/get_latest_pdf.py --json
+```
+
+**Python调用**：
+```python
+from scripts.get_latest_pdf import PDFFinder
+
+# 使用默认路径
+finder = PDFFinder()
+result = finder.find_latest()
+
+if result['success']:
+    pdf_path = result['file_path']
+    print(f"最新PDF: {pdf_path}")
+else:
+    print(f"错误: {result['error']}")
+```
+
+---
 
 ## 核心功能
 
 当用户提供一个文档路径时，按以下 3 步分别输出，并自动发送到飞书：
 
-### 路径参数支持 ⭐ NEW (v2.2)
+### 路径参数支持 ⭐ UPDATED (v2.3)
 
 支持多种路径格式：
 
@@ -202,7 +243,12 @@ result = sender.send(content, auto_send=True)  # 自动发送
 根据文件后缀选择读取方式：
 
 ### PDF 文件
-- 优先使用 `scripts/pdf_extractor.py` 自动检测并提取文本
+- **文件查找**：使用 `scripts/get_latest_pdf.py` 获取最新PDF（避免shell glob问题）
+  - 使用 `Path.glob()` 而非 shell glob
+  - 先检查目录是否存在
+  - 按修改时间排序返回最新文件
+  - 支持自定义路径和默认路径
+- **文本提取**：使用 `scripts/pdf_extractor.py` 自动检测并提取文本
 - 支持多库：pymupdf、pdfplumber、PyPDF2
 - 大文件处理：`max_pages` 参数控制提取页数
 - 如果 Read 工具不可用，回退到脚本解析
@@ -224,9 +270,15 @@ result = sender.send(content, auto_send=True)  # 自动发送
 ↓
 你：好的，我来阅读这份文档
 ↓
-[PDF 解析：使用 pdf_extractor.py 自动检测并提取文本]
+[步骤1：文件查找] 使用 get_latest_pdf.py 获取PDF
+  • 检查目录是否存在
+  • 使用 Path.glob() 查找PDF文件
+  • 按修改时间排序返回最新文件
+  • 如果有自定义路径则使用自定义路径
 ↓
-[快速扫描文档：摘要目录 + 核心章节]
+[步骤2：PDF解析] 使用 pdf_extractor.py 自动检测并提取文本
+↓
+[步骤3：文档扫描] 快速扫描文档：摘要目录 + 核心章节
 ↓
 输出第一步：中文标题（🎯2026开头）
 ↓
@@ -234,7 +286,7 @@ result = sender.send(content, auto_send=True)  # 自动发送
 ↓
 输出第三步：小红书笔记（紧凑格式模板）
 ↓
-[飞书自动发送：使用 feishu_sender.py 发送到飞书]
+[步骤4：飞书发送] 使用 feishu_sender.py 发送到飞书
 ↓
 完成：用户可在飞书中查看完整笔记
 ```
@@ -306,13 +358,35 @@ result = sender.send(content, auto_send=True)  # 自动发送
 2. 检查是否包含路径参数（空格分隔）
 3. 如果有路径：
    - 验证路径存在
-   - 如果是文件夹 → 查找最新PDF（按修改时间排序）
+   - 如果是文件夹 → 使用 get_latest_pdf.py 查找最新PDF
    - 如果是文件 → 验证是PDF格式
-4. 如果没有路径 → 使用默认的报告喵文件夹路径
+4. 如果没有路径 → 使用默认的报告喵文件夹路径，通过 get_latest_pdf.py 获取最新PDF
+5. **关键修复**：使用 Path.glob() 而非 shell glob，先检查目录是否存在
 
 
 ---
-#### 飞书自动发送 - 修复记录
+#### 修复记录
+
+**文件查找问题修复** (v2.3 - 2026-02-24)：
+- ✅ 创建 `get_latest_pdf.py` 脚本，专门处理PDF文件查找
+- ✅ 使用 `Path.glob()` 而非 shell glob，避免 shell 扩展问题
+- ✅ 先检查目录是否存在，提供清晰的错误信息
+- ✅ 支持自定义路径和默认路径
+- ✅ 新增 SKILL.md 默认配置说明
+
+**修复前的问题**：
+```bash
+# shell glob 失败
+ls -lt ~/Library/Mobile\ Documents/.../报告喵/*.pdf
+# 返回: no matches found
+```
+
+**修复后的方案**：
+```bash
+# 使用 Python glob
+python3 scripts/get_latest_pdf.py
+# 返回: ✅ 找到最新PDF
+```
 
 **多消息发送支持** (v2.2.1 - 2026-02-11)：
 - 笔记内容会分成3条独立消息，分别发送：
