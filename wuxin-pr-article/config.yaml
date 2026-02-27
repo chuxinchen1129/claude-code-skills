@@ -1,0 +1,59 @@
+# 悟昕公关文章生成器配置
+
+# 引用共享配置
+include: ../../03_WUXIN_CONTENT/assets/config.yaml
+
+# ==================== 技能特定配置 ====================
+
+defaults:
+  # 文章参数
+  tone: formal                      # 语气: formal=正式, professional=专业
+  length: medium                    # 长度: short=短篇, medium=中篇, long=长篇
+  brand_integration: explicit       # 品牌植入: explicit=明确, balanced=平衡
+
+  # API 配置
+  api:
+    provider: zhipuai               # API 提供商
+    model: glm-4.7                  # 模型名称
+    api_key_env: ZHIPUAI_API_KEY    # 环境变量名
+    max_tokens: 3000
+    temperature: 0.7
+    timeout: 120
+
+  # 格式参数
+  format: markdown                  # 输出格式
+  encoding: utf-8
+
+# ==================== 文章类型 ====================
+
+article_types:
+  brand_story:
+    name: "品牌背书文"
+    sections: ["背景", "核心价值", "科学依据", "品牌愿景"]
+    tone: formal
+
+  industry_insight:
+    name: "行业洞察文"
+    sections: ["行业现状", "趋势分析", "品牌优势", "未来展望"]
+    tone: professional
+
+  user_story:
+    name: "用户故事文"
+    sections: ["用户背景", "睡眠困扰", "解决方案", "改变结果"]
+    tone: narrative
+
+  media_release:
+    name: "媒体稿件"
+    sections: ["新闻要点", "事件详情", "品牌立场", "联系方式"]
+    tone: journalistic
+
+# ==================== 输出配置 ====================
+
+output:
+  dir: ./output
+  format: markdown
+
+# 文件命名模板
+naming:
+  article: "{type}_{topic}_{date}.md"
+  batch: "{type}_batch_{date}/"

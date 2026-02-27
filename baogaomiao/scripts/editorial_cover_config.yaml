@@ -1,0 +1,33 @@
+# 报告喵封面生成器配置文件
+# 配置文件路径：默认、自定义、iCloud路径等
+
+# 默认路径配置
+defaults:
+  # 默认的报告喵路径（macOS iCloud）
+  default_path: ~/Library/Mobile Documents/com~apple~CloudDocs/家人共享/报告喵
+
+  # 默认的封面输出目录
+  default_output_dir: ~/Desktop/DMS/skills/baogaomiao/scripts/covers
+
+  # 页码字号（倍数）
+  page_num_font_scale: 2.0  # 2x = text-[6.7rem]
+
+  # 标题字号（倍数）
+  title_font_scale: 1.0  # 1x = text-[3.6rem]
+
+  # 摘要标题长度限制
+  highlight_title_max_length: 60  # 60字（3句话）
+  summary_max_length: 100  # 100字左右（从小红书笔记提取）
+
+  # 容器尺寸（宽x高）
+  container_width: 640
+  container_height: 900
+
+# 自定义路径配置
+custom_paths:
+  # 用户可以在这里添加自定义的报告喵路径
+  # 格式：路径或别名
+  examples:
+    - path: /path/to/folder
+    - path: ~/Documents/MyReports
+    - alias: work

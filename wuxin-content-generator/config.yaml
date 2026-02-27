@@ -1,0 +1,42 @@
+# Wuxin Zenoasis Content Project - 配置文件
+
+# 智谱AI配置
+zhipuai:
+  api_key: "${ZHIPUAI_API_KEY}"  # 从环境变量读取
+  model: "glm-4.7"  # 可选: glm-4.7, glm-4, glm-4-plus, glm-4-flash, glm-4-air
+  temperature: 0.7
+  max_tokens: 2000
+
+# 内容配置
+content:
+  platform: "xiaohongshu"  # 发布平台
+  target_length: 500-600  # 目标字数范围
+  image_count: 3-5  # 配图数量
+
+# 路径配置
+paths:
+  strategy_planning: "00_Strategy_Planning"
+  brand_assets: "01_Brand_Assets_Library"
+  sleep_science_wiki: "01_Brand_Assets_Library/05_Sleep_Science_Wiki"
+  output: "output"
+
+# 小红书内容配置
+xiaohongshu:
+  # 标题模板
+  title_templates:
+    - "💤 {topic} | 睡眠科普"
+    - "🌙 睡眠小知识：{topic}"
+    - "【科普】{topic}，你了解多少？"
+
+  # 标签
+  hashtags:
+    - "睡眠科普"
+    - "健康睡眠"
+    - "睡眠知识"
+    - "悟昕睡眠"
+    - "好睡眠"
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "output/app.log"

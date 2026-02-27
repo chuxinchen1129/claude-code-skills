@@ -25,7 +25,7 @@ updated: 2026-02-10
 
 **Agent 执行说明**:
 1. 确定此 SKILL.md 文件的目录路径为 `SKILL_DIR`
-2. 脚本路径 = `${SKILL_DIR}/scripts/<script-name>.py`
+2. 脚本路径 = `/Users/echochen/Desktop/DMS/skills/wuxin-sleep-hotspot-collector/scripts/<script-name>.py`
 3. 将本文档中所有 `${SKILL_DIR}` 替换为实际路径
 
 ```
@@ -149,7 +149,7 @@ data/weekly_reports/
 
 **执行**：
 ```bash
-python3 ${SKILL_DIR}/scripts/xiaohongshu_collector.py
+python3 /Users/echochen/Desktop/DMS/skills/wuxin-sleep-hotspot-collector/scripts/xiaohongshu_collector.py
 ```
 
 **参数**：
@@ -163,7 +163,7 @@ python3 ${SKILL_DIR}/scripts/xiaohongshu_collector.py
 
 **执行**：
 ```bash
-python3 ${SKILL_DIR}/scripts/link_processor.py <url>
+python3 /Users/echochen/Desktop/DMS/skills/wuxin-sleep-hotspot-collector/scripts/link_processor.py <url>
 ```
 
 **支持**：
@@ -178,7 +178,7 @@ python3 ${SKILL_DIR}/scripts/link_processor.py <url>
 
 **执行**：
 ```bash
-python3 ${SKILL_DIR}/scripts/weekly_analyzer.py
+python3 /Users/echochen/Desktop/DMS/skills/wuxin-sleep-hotspot-collector/scripts/weekly_analyzer.py
 ```
 
 **输出**：
@@ -192,7 +192,7 @@ python3 ${SKILL_DIR}/scripts/weekly_analyzer.py
 
 **执行**：
 ```bash
-python3 ${SKILL_DIR}/scripts/feishu_uploader.py --report <报告路径> --table <表格路径>
+python3 /Users/echochen/Desktop/DMS/skills/wuxin-sleep-hotspot-collector/scripts/feishu_uploader.py --report <报告路径> --table <表格路径>
 ```
 
 **依赖**：feishu-automation-v2 Skill

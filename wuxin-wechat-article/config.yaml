@@ -1,0 +1,62 @@
+# 悟昕公众号文章生成器配置
+
+# 引用共享配置
+include: ../../03_WUXIN_CONTENT/assets/config.yaml
+
+# ==================== 技能特定配置 ====================
+
+defaults:
+  # 文章参数
+  length: long                     # 长度: short=短篇, long=长文(2000字)
+  style: narrative                 # 风格: narrative=叙事, educational=科普
+  brand_integration: balanced      # 品牌植入: balanced=平衡植入
+
+  # API 配置
+  api:
+    provider: zhipuai               # API 提供商
+    model: glm-4.7                  # 模型名称
+    api_key_env: ZHIPUAI_API_KEY    # 环境变量名
+    max_tokens: 3000
+    temperature: 0.7
+    timeout: 120
+
+  # 格式参数
+  format: markdown
+  encoding: utf-8
+
+# ==================== 文章类型 ====================
+
+article_types:
+  science_article:
+    name: "科普长文"
+    target_words: 2000
+    sections: ["引入", "原理", "解决方案", "总结"]
+    style: educational
+
+  story_article:
+    name: "故事型文章"
+    target_words: 1800
+    sections: ["背景", "困扰", "改变", "结果"]
+    style: narrative
+
+  list_article:
+    name: "清单型文章"
+    target_words: 1500
+    sections: ["引入", "清单", "详解", "总结"]
+    style: practical
+
+  qna_article:
+    name: "问答型文章"
+    target_words: 1600
+    sections: ["问题", "回答", "扩展", "总结"]
+    style: conversational
+
+# ==================== 输出配置 ====================
+
+output:
+  dir: ./output
+  format: markdown
+
+# 文件命名模板
+naming:
+  article: "{type}_{topic}_{date}.md"

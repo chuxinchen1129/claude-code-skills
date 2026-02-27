@@ -12,6 +12,16 @@ import urllib.error
 import json
 from pathlib import Path
 
+# 导入飞书路径模块
+_dms_root = Path(__file__).parent.parent.parent.parent
+_feishu_scripts = _dms_root / 'skills' / 'feishu-universal' / 'scripts'
+sys.path.insert(0, str(_feishu_scripts))
+try:
+    from feishu_paths import FeishuPaths
+    USE_FEISHU_PATHS = True
+except ImportError:
+    USE_FEISHU_PATHS = False
+
 
 class FeishuSender:
     """飞书消息发送器"""
@@ -106,13 +116,17 @@ class FeishuSender:
         Args:
             content: 可以是字符串或字符串列表（用于分批发送）
         """
-        # 使用绝对路径解析，避免在工作目录运行时路径错误
-        base_dir = Path(__file__).resolve().parent
-        script_path = base_dir / 'feishu-universal' / 'scripts' / 'feishu_bot_notifier.py'
+        # 使用统一的飞书路径管理
+        if USE_FEISHU_PATHS:
+            script_path = FeishuPaths.BOT_NOTIFIER
+        else:
+            # 回退到相对路径
+            base_dir = Path(__file__).resolve().parent
+            script_path = base_dir / 'feishu-universal' / 'scripts' / 'feishu_bot_notifier.py'
 
-        if not script_path.exists():
-            # 回退到本地路径
-            script_path = Path.home() / '.claude' / 'skills' / 'feishu-universal' / 'scripts' / 'feishu_bot_notifier.py'
+            if not script_path.exists():
+                # 再回退到 DMS 根目录
+                script_path = _dms_root / 'skills' / 'feishu-universal' / 'scripts' / 'feishu_bot_notifier.py'
 
         if not script_path.exists():
             return {
@@ -175,6 +189,64 @@ class FeishuSender:
                 'error': f'未知错误: {str(e)}'
             }
 
+    def send_screenshots(self, screenshot_paths):
+        """发送截图列表到飞书
+
+        Args:
+            screenshot_paths: 截图文件路径列表
+
+        Returns:
+            dict: 发送结果
+        """
+        if not screenshot_paths:
+            return {'success': True, 'message': '没有截图需要发送'}
+
+        try:
+            # 导入 FeishuBotNotifier
+            import sys
+            from pathlib import Path
+
+            # 优先使用 ~/.claude/skills/feishu-universal
+            feishu_universal_dir = Path.home() / '.claude' / 'skills' / 'feishu-universal'
+
+            # 如果不存在，尝试相对路径（用于开发环境）
+            if not feishu_universal_dir.exists():
+                base_dir = Path(__file__).resolve().parent.parent
+                feishu_universal_dir = base_dir / 'feishu-universal'
+
+            # 将 feishu-universal 添加到 Python 路径
+            if str(feishu_universal_dir) not in sys.path:
+                sys.path.insert(0, str(feishu_universal_dir))
+
+            from scripts.feishu_bot_notifier import FeishuBotNotifier
+
+            notifier = FeishuBotNotifier()
+            results = notifier.send_image_batch(screenshot_paths, delay=1)
+
+            if results['success'] == results['total']:
+                return {
+                    'success': True,
+                    'message': f"{results['total']} 张截图已发送到飞书",
+                    'results': results
+                }
+            else:
+                return {
+                    'success': False if results['success'] == 0 else True,  # 部分成功也算成功
+                    'message': f"截图发送完成: {results['success']}/{results['total']} 成功",
+                    'results': results
+                }
+
+        except FileNotFoundError as e:
+            return {
+                'success': False,
+                'error': f'未找到飞书通知模块: {e}'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'发送截图失败: {str(e)}'
+            }
+
     def send(self, content, auto_send=True):
         """
         发送消息到飞书
@@ -202,35 +274,34 @@ class FeishuSender:
         return self.send_via_bot_notifier(content)
 
 
-def format_xhs_note(chinese_title, english_title, xhs_note):
+def format_xhs_note(xhs_note):
     """格式化小红书笔记内容用于发送
 
-    返回3个独立的消息，分别发送：
-    1. 中文标题
-    2. 英文标题（带分隔符）
-    3. 小红书笔记
+    只返回小红书笔记（不再包含中英文标题）
     """
-    separator = "\n" + "="*50 + "\n"
-    return [
-        chinese_title,
-        separator + english_title,
-        separator + xhs_note
-    ]
+    return [xhs_note]
 
 
 def main():
     """命令行入口"""
-    if len(sys.argv) < 2:
-        print("用法: python feishu_sender.py <内容> [--no-auto]")
-        print("选项:")
-        print("  --no-auto    不自动发送，仅返回格式化内容")
-        print("\n示例:")
-        print("  python feishu_sender.py '这是要发送的内容'")
-        print("  python feishu_sender.py '这是内容' --no-auto")
+    import argparse
+
+    parser = argparse.ArgumentParser(description='飞书消息发送工具')
+    parser.add_argument('--content', '-c', type=str, help='要发送的内容')
+    parser.add_argument('--no-auto', action='store_true', help='不自动发送，仅返回格式化内容')
+    parser.add_argument('--auto-send', action='store_true', help='自动发送（默认行为）')
+    parser.add_argument('message', nargs='?', type=str, help='要发送的内容（位置参数）')
+
+    args = parser.parse_args()
+
+    # 优先使用 --content 参数，否则使用位置参数
+    content = args.content or args.message
+
+    if not content:
+        parser.print_help()
         sys.exit(1)
 
-    content = sys.argv[1]
-    auto_send = '--no-auto' not in sys.argv
+    auto_send = not args.no_auto
 
     sender = FeishuSender()
     result = sender.send(content, auto_send=auto_send)
@@ -244,9 +315,10 @@ def main():
             print(result['content'])
     else:
         print(f"❌ 发送失败: {result.get('error', '未知错误')}")
-        if not auto_send:
-            print("\n--- 内容 ---")
-            print(content)
+        if 'results' in result:
+            for r in result['results']:
+                if not r['success']:
+                    print(f"  - {r.get('error', '未知错误')}")
         sys.exit(1)
 
 

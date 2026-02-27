@@ -7,7 +7,6 @@
 1. 链接采集（集成 MediaCrawler）
 2. 数据上传（集成 feishu-universal）
 3. 发送回复（飞书 API）
-4. CC生成笔记（自动处理PDF并发送到飞书）
 """
 
 import os
@@ -240,11 +239,11 @@ class MediaCrawlerClient:
 mediacrawler_client = MediaCrawlerClient()
 
 # ============================================
-# Baogaomiao 集成 - CC生成笔记
+# Baogaomiao 集成（任务处理）
 # ============================================
 
 class BaogaomiaoGenerator:
-    """报告喵生成器 - 从PDF生成小红书笔记"""
+    """报告喵生成器 - 从PDF生成小红书笔记（供守护进程使用）"""
 
     def __init__(self):
         # 报告喵文件夹路径
@@ -316,7 +315,7 @@ class BaogaomiaoGenerator:
             'success': True,
             'task_id': task_id,
             'task_file': str(task_file),
-            'message': f'✅ PDF已提取，正在生成小红书笔记...\n💡 在Claude Code中说"处理baogaomiao任务"或"完成CC生成"以继续处理\n📝 任务ID: {task_id}'
+            'message': f'✅ PDF已提取，正在生成小红书笔记...\n💡 在Claude Code中说"处理baogaomiao任务"以继续处理\n📝 任务ID: {task_id}'
         }
 
     def check_task_completion(self, task_id):
@@ -422,7 +421,7 @@ class MessageHandler:
             'status': self.handle_status,
             'help': self.handle_help,
             'ping': self.handle_ping,
-            'cc': self.handle_cc_generate
+            'choice': self.handle_eastmoney_choice  # 东方财富爬虫选择
         }
 
     def process(self, message_text, user_open_id):
@@ -437,9 +436,14 @@ class MessageHandler:
         """
         message_text = message_text.strip()
 
-        # 优先检测 "CC生成笔记" 命令
-        if message_text == 'CC生成笔记':
-            return self.handle_cc_generate(user_open_id)
+        # 检测东方财富爬虫选择消息（JSON格式或纯数字）
+        try:
+            data = json.loads(message_text)
+            if 'choice' in data or 'index' in data:
+                return self._handle_eastmoney_selection(message_text, user_open_id)
+        except json.JSONDecodeError:
+            if message_text.isdigit():
+                return self._handle_eastmoney_selection(message_text, user_open_id)
 
         # 检测链接
         if self.is_url(message_text):
@@ -473,6 +477,54 @@ class MessageHandler:
         """检测是否为URL"""
         url_pattern = r'https?://(xhs\.com|xhslink\.com|xiaohongshu\.com|mp\.weixin\.qq\.com|v\.douyin\.com)'
         return bool(re.search(url_pattern, text))
+
+    def _handle_eastmoney_selection(self, message_text, user_open_id):
+        """处理东方财富爬虫的PDF选择
+
+        格式：{"choice": 1} 或 1
+
+        Args:
+            message_text: 消息文本
+            user_open_id: 用户 open_id
+
+        Returns:
+            str: 回复文本
+        """
+        try:
+            # 解析选择
+            choice = None
+            if message_text.strip().isdigit():
+                choice = int(message_text.strip())
+            else:
+                data = json.loads(message_text)
+                choice = data.get('choice') or data.get('index')
+
+            # 写入选择文件
+            eastmoney_selection_file = Path("/Users/echochen/Desktop/DMS/temp/eastmoney_downloads/selection_result.json")
+            eastmoney_selection_file.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(eastmoney_selection_file, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+                existing_data['choice'] = choice
+                existing_data['updated_at'] = datetime.now().isoformat()
+
+            with open(eastmoney_selection_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+
+            msg = f"✅ 已记录东方财富研报选择：{choice}"
+            logger.info(f"用户 {user_open_id} 选择东方财富研报: {choice}")
+            feishu_api.send_message(user_open_id, msg)
+            return msg
+
+        except FileNotFoundError:
+            msg = "⚠️ 未找到待选择的研报列表，请先运行爬虫"
+            feishu_api.send_message(user_open_id, msg)
+            return msg
+        except Exception as e:
+            logger.error(f"处理东方财富选择失败: {e}")
+            msg = f"❌ 处理选择失败: {str(e)}"
+            feishu_api.send_message(user_open_id, msg)
+            return msg
 
     def handle_url(self, url, user_open_id):
         """处理链接采集 - 使用智能内容路由"""
@@ -749,9 +801,6 @@ class MessageHandler:
 采集：关键词 [数量]
 例：采集：睡眠仪 50
 
-📌 CC生成笔记（PDF提取 + baogaomiao任务创建）
-💡 工作流：PDF提取 → 创建任务 → Claude Code处理生成XHS笔记 → 自动发送到飞书
-
 📌 数据导入（MediaCrawler采集结果）
 导入：最新 [导入最近7天采集数据]
 导入：7 [导入7天内采集数据]
@@ -782,55 +831,27 @@ class MessageHandler:
 
         return msg
 
-    def handle_cc_generate(self, user_open_id):
-        """处理CC生成笔记命令 - 自动处理PDF并发送到飞书"""
-        logger.info("处理CC生成笔记命令")
+    def handle_eastmoney_choice(self, user_open_id):
+        """处理东方财富爬虫的PDF选择
 
-        # 获取最新PDF文件
-        file_result = baogaomiao_generator.get_latest_file()
-
-        if not file_result['success']:
-            error_msg = f"""❌ {file_result.get('error', '无法获取文件')}
-💡 请确保PDF文件已放入报告喵文件夹"""
-            feishu_api.send_message(user_open_id, error_msg)
-            return error_msg
-
-        # 发送开始消息
-        start_msg = f"""✅ 开始处理PDF
-
-文件：{file_result['file_name']}
-时间：{file_result['file_time']}
-
-📂 正在生成小红书笔记..."""
-        feishu_api.send_message(user_open_id, start_msg)
-
-        # 生成笔记（baogaomiao 会自动发送到飞书）
-        generate_result = baogaomiao_generator.generate_note(file_result['file_path'])
-
-        if not generate_result['success']:
-            error_msg = f"""❌ PDF处理失败
-
-错误：{generate_result.get('error', '未知错误')}
-💡 请检查PDF文件是否损坏"""
-            feishu_api.send_message(user_open_id, error_msg)
-            return error_msg
-
-        # 构建结果消息 - 使用新的工作流
-        task_id = generate_result.get('task_id', 'unknown')
-        task_file = generate_result.get('task_file', '')
-
-        result_msg = generate_result.get('message', f'✅ PDF已处理，任务ID: {task_id}')
-
-        feishu_api.send_message(user_open_id, result_msg)
-
-        # 返回任务信息
-        return result_msg
+        格式：{"choice": 1} 或 1
+        """
+        return {"success": False, "message": "此功能需要通过主爬虫脚本触发"}
 
     def handle_unknown(self, message, user_open_id):
         """处理未知命令"""
+        # 无法识别的命令
         msg = f"""❓ 无法识别命令：{message}
 
-💡 发送"help"查看使用指南"""
+💡 发送"help"查看使用指南
+
+可用命令：
+• 发送链接（小红书/微信/抖音）
+• 采集：关键词 [数量]
+• 上传
+• 查看状态
+• ping
+• 发送数字或JSON选择东方财富研报"""
 
         feishu_api.send_message(user_open_id, msg)
 
@@ -916,7 +937,6 @@ def main():
     ║                                      ║
     ║  ✨ 功能特性：                        ║
     ║  • 链接采集（智能路由）            ║
-    ║  • CC生成笔记（任务队列）            ║
     ║  • MediaCrawler集成（数据采集）        ║
     ║  • 飞书自动回复                    ║
     ║                                      ║

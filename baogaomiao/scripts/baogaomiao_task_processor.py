@@ -27,6 +27,9 @@ sys.path.insert(0, str(script_dir))
 # 导入baogaomiao组件
 from pdf_extractor import PDFExtractor
 from feishu_sender import FeishuSender, format_xhs_note
+from file_namer import PDFRenamer
+from editorial_cover import EditorialCoverGenerator
+from html_to_image import HTMLToImageConverter
 
 # 配置
 TASK_DIR = Path.home() / ".claude" / "skills" / "feishu-bot" / "data" / "baogaomiao_tasks"
@@ -43,8 +46,10 @@ logger = logging.getLogger(__name__)
 class BaogaomiaoTaskProcessor:
     """baogaomiao任务处理器"""
 
-    def __init__(self):
+    def __init__(self, enable_screenshots=False, screenshot_dir=None):
         self.task_dir = TASK_DIR
+        self.enable_screenshots = enable_screenshots
+        self.screenshot_dir = screenshot_dir
 
     def check_new_tasks(self):
         """检查是否有新的pending任务"""
@@ -91,7 +96,11 @@ class BaogaomiaoTaskProcessor:
                                       error='PDF文件不存在')
                 return
 
-            pdf_extractor = PDFExtractor(pdf_path)
+            pdf_extractor = PDFExtractor(
+                pdf_path,
+                enable_screenshots=self.enable_screenshots,
+                screenshot_dir=self.screenshot_dir
+            )
             extract_result = pdf_extractor.extract(max_pages=5)
 
             if not extract_result['success']:
@@ -102,6 +111,13 @@ class BaogaomiaoTaskProcessor:
             pdf_text = extract_result.get('text', '')
             logger.info(f"  ✓ PDF提取成功，共 {len(pdf_text)} 字符")
 
+            # 处理截图结果
+            screenshots = extract_result.get('screenshots', [])
+            if screenshots:
+                logger.info(f"  ✓ 截图完成，共 {len(screenshots)} 张")
+                for shot in screenshots:
+                    logger.info(f"      - 第 {shot['page']} 页: {shot['path']}")
+
             # 步骤2：生成小红书笔记（3步输出）
             # 这里调用实际的baogaomiao skill逻辑来生成笔记
             # 由于是独立脚本，需要模拟完整工作流
@@ -109,14 +125,30 @@ class BaogaomiaoTaskProcessor:
             # 步骤2.1：生成中文标题
             chinese_title = self._generate_chinese_title(pdf_text)
 
-            # 步骤2.2：生成英文标题
+            # 步骤2.2：自动重命名 PDF 文件（在飞书发送前）
+            try:
+                renamer = PDFRenamer()
+                new_filename = renamer.generate_filename(chinese_title, Path(pdf_path))
+                rename_result = renamer.rename_pdf(Path(pdf_path), new_filename)
+
+                if rename_result['success']:
+                    logger.info(f"  ✓ {rename_result['message']}")
+                    # 更新 pdf_path 为新路径
+                    pdf_path = str(rename_result['new_path'])
+                else:
+                    logger.warning(f"  ⚠️ 重命名失败: {rename_result['message']}")
+                    # 继续使用原路径
+            except Exception as e:
+                logger.warning(f"  ⚠️ 重命名异常: {e}，继续使用原文件名")
+
+            # 步骤2.3：生成英文标题
             english_title = self._generate_english_title(chinese_title)
 
-            # 步骤2.3：生成小红书笔记
+            # 步骤2.4：生成小红书笔记
             xhs_note = self._generate_xhs_note(pdf_text)
 
-            # 格式化完整笔记
-            full_note = format_xhs_note(chinese_title, english_title, xhs_note)
+            # 格式化完整笔记（只发送小红书笔记）
+            full_note = format_xhs_note(xhs_note)
 
             # 步骤3：发送到飞书
             sender = FeishuSender()
@@ -125,15 +157,86 @@ class BaogaomiaoTaskProcessor:
             if send_result['success']:
                 logger.info(f"  ✓ 飞书发送成功")
 
+                # 步骤3.5：发送截图（如果有）
+                if screenshots:
+                    logger.info(f"\n📷 发送 {len(screenshots)} 张截图到飞书...")
+                    screenshot_paths = [s['path'] for s in screenshots]
+                    screenshot_result = sender.send_screenshots(screenshot_paths)
+
+                    if screenshot_result['success']:
+                        logger.info(f"  ✓ 截图已发送到飞书")
+                    else:
+                        logger.warning(f"  ⚠️ 截图发送失败: {screenshot_result.get('error', '未知')}")
+
+                # 步骤3.6：生成并发送封面图
+                cover_path = None
+                cover_sent = False
+
+                logger.info(f"\n📰 生成社论风封面...")
+                page_count = extract_result['total_pages']
+                source = pdf_extractor.extract_source()
+                year = self._extract_year(chinese_title)
+
+                # 提取梗概和关键词
+                genggai, guanjianci = self._extract_note_metadata(xhs_note)
+
+                generator = EditorialCoverGenerator()
+                cover_result = generator.generate_cover(
+                    source=source,
+                    page_count=page_count,
+                    chinese_title=chinese_title,
+                    english_title=english_title,
+                    year=year,
+                    highlight_title=genggai,
+                    summary_text=guanjianci
+                )
+
+                if cover_result['success']:
+                    logger.info(f"  ✓ HTML封面已生成")
+
+                    # 转换为PNG
+                    converter = HTMLToImageConverter()
+                    png_result = converter.convert_to_xhs_style(
+                        html_path=str(cover_result['path'])
+                    )
+
+                    if png_result['success']:
+                        logger.info(f"  ✓ 封面PNG已生成: {png_result['path']}")
+
+                        # 发送封面图片
+                        cover_send_result = sender.send_screenshots([str(png_result['path'])])
+
+                        if cover_send_result['success']:
+                            logger.info(f"  ✓ 封面已发送到飞书")
+                            cover_path = str(png_result['path'])
+                            cover_sent = True
+                        else:
+                            logger.warning(f"  ⚠️ 封面发送失败: {cover_send_result.get('error', '未知')}")
+                    else:
+                        logger.warning(f"  ⚠️ 封面PNG转换失败: {png_result.get('message', '未知')}")
+                else:
+                    logger.warning(f"  ⚠️ 封面生成失败: {cover_result.get('message', '未知')}")
+
                 # 保存处理结果到任务文件
                 result_data = {
                     'status': 'completed',
+                    'pdf_path': pdf_path,  # 更新为重命名后的路径
                     'chinese_title': chinese_title,
                     'english_title': english_title,
                     'xhs_note': xhs_note,
                     'completed_at': datetime.now().isoformat(),
                     'sent_to_feishu': True
                 }
+
+                # 添加截图信息（如果有）
+                if screenshots:
+                    result_data['screenshots'] = screenshots
+                    result_data['screenshot_count'] = len(screenshots)
+
+                # 添加封面信息（如果生成成功）
+                if cover_path:
+                    result_data['cover_path'] = cover_path
+                    result_data['cover_sent'] = cover_sent
 
                 self._update_task_status(task_file, 'completed', result=result_data)
                 logger.info(f"✓ 任务 {task_id} 处理完成")
@@ -142,7 +245,8 @@ class BaogaomiaoTaskProcessor:
                     'success': True,
                     'task_id': task_id,
                     'chinese_title': chinese_title,
-                    'english_title': english_title
+                    'english_title': english_title,
+                    'screenshots': screenshots
                 }
             else:
                 error_msg = send_result.get('error', '飞书发送失败')
@@ -175,6 +279,48 @@ class BaogaomiaoTaskProcessor:
     def _generate_english_title(self, chinese_title):
         """生成英文标题"""
         return "PDF Summary"
+
+    def _extract_year(self, chinese_title):
+        """从中文标题提取年份
+
+        Args:
+            chinese_title: 中文标题
+
+        Returns:
+            年份（int），提取失败返回当前年份
+        """
+        import re
+        match = re.search(r'🎯(\d{4})', chinese_title)
+        if match:
+            return match.group(1)
+        return datetime.now().year
+
+    def _extract_note_metadata(self, xhs_note):
+        """从小红书笔记提取梗概和关键词
+
+        Args:
+            xhs_note: 小红书笔记内容
+
+        Returns:
+            tuple: (genggai, guanjianci)
+        """
+        lines = xhs_note.strip().split('\n')
+
+        # 提取梗概（"梗概："行）
+        genggai = "核心要点"
+        for line in lines:
+            if line.startswith('梗概：'):
+                genggai = line.replace('梗概：', '').strip()
+                break
+
+        # 提取关键词（"关键词："行）
+        guanjianci = ""
+        for line in lines:
+            if line.startswith('关键词：'):
+                guanjianci = line.replace('关键词：', '').strip()
+                break
+
+        return genggai, guanjianci
 
     def _generate_xhs_note(self, pdf_text):
         """生成小红书笔记"""
@@ -241,10 +387,23 @@ def main():
         default=60,
         help='检查间隔（秒），默认60秒'
     )
+    parser.add_argument(
+        '--enable-screenshots', '--screenshots', '-s',
+        action='store_true',
+        help='启用PDF截图功能'
+    )
+    parser.add_argument(
+        '--screenshot-dir', '--dir', '-d',
+        type=str,
+        help='截图保存目录'
+    )
 
     args = parser.parse_args()
 
-    processor = BaogaomiaoTaskProcessor()
+    processor = BaogaomiaoTaskProcessor(
+        enable_screenshots=args.enable_screenshots,
+        screenshot_dir=args.screenshot_dir
+    )
 
     if args.check:
         # 检查新任务

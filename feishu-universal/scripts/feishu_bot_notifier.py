@@ -53,12 +53,19 @@ class FeishuBotNotifier:
         else:
             raise Exception(f"请求失败: {response.status_code}")
 
-    def send_message(self, content):
+    def send_message(self, content, max_retries=3, retry_delay=1):
         """发送消息到用户
 
         Args:
             content: 消息内容
+            max_retries: 最大重试次数（默认3次）
+            retry_delay: 重试延迟秒数（默认1秒）
+
+        Returns:
+            bool: 发送是否成功
         """
+        import time
+
         url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
 
         headers = {
@@ -72,19 +79,286 @@ class FeishuBotNotifier:
             "content": json.dumps({"text": content})
         }
 
-        response = requests.post(url, headers=headers, json=payload)
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=10  # 10秒超时
+                )
 
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("code") == 0:
-                print("✓ 通知已发送到飞书")
-                return True
-            else:
-                print(f"✗ 发送失败: {data.get('msg')}")
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("code") == 0:
+                        print("✓ 通知已发送到飞书")
+                        return True
+                    else:
+                        # API 返回错误，检查是否可重试
+                        error_code = data.get("code")
+                        error_msg = data.get("msg", "未知错误")
+
+                        # 限流错误 (99991663) 和某些临时错误可重试
+                        retryable_codes = [99991663, 99991400, 99991398]
+                        if error_code in retryable_codes and attempt < max_retries - 1:
+                            print(f"⚠️ API限流/临时错误 ({error_code})，{retry_delay}秒后重试...")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            print(f"✗ 发送失败: [{error_code}] {error_msg}")
+                            return False
+                else:
+                    # HTTP 错误
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ HTTP {response.status_code}，{retry_delay}秒后重试...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        print(f"✗ 请求失败: HTTP {response.status_code}")
+                        return False
+
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ 请求超时，{retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print("✗ 请求超时")
+                    return False
+
+            except requests.exceptions.ConnectionError as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ 网络连接错误，{retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print(f"✗ 网络连接错误: {e}")
+                    return False
+
+            except Exception as e:
+                print(f"✗ 未知错误: {e}")
+                return False
+
+        return False
+
+    def upload_image(self, image_path, max_retries=3, retry_delay=1):
+        """上传图片到飞书，返回 image_key
+
+        Args:
+            image_path: 图片文件路径
+            max_retries: 最大重试次数（默认3次）
+            retry_delay: 重试延迟秒数（默认1秒）
+
+        Returns:
+            str: image_key，失败返回 None
+        """
+        import time
+
+        if not os.path.exists(image_path):
+            print(f"✗ 图片文件不存在: {image_path}")
+            return None
+
+        url = f"{self.base_url}/im/v1/images"
+
+        for attempt in range(max_retries):
+            try:
+                # 使用 requests_toolbell 的 MultipartEncoder 确保正确的编码
+                try:
+                    from requests_toolbelt import MultipartEncoder
+
+                    form = {
+                        'image_type': 'message',
+                        'image': (os.path.basename(image_path), open(image_path, 'rb'), 'image/png')
+                    }
+                    multi_form = MultipartEncoder(form)
+                    headers = {
+                        "Authorization": f"Bearer {self.app_access_token}",
+                        "Content-Type": multi_form.content_type
+                    }
+                    response = requests.post(url, headers=headers, data=multi_form, timeout=30)
+
+                except ImportError:
+                    # 回退到标准 requests 格式（使用 'image' 字段名）
+                    headers = {
+                        "Authorization": f"Bearer {self.app_access_token}"
+                    }
+                    with open(image_path, 'rb') as f:
+                        files = {
+                            'image_type': (None, 'message'),
+                            'image': (os.path.basename(image_path), f, 'image/png')
+                        }
+                        response = requests.post(url, headers=headers, files=files, timeout=30)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("code") == 0:
+                        image_key = data.get("data", {}).get("image_key")
+                        if image_key:
+                            print(f"✓ 图片上传成功: {os.path.basename(image_path)}")
+                            return image_key
+                        else:
+                            print(f"✗ 上传响应中没有 image_key")
+                            return None
+                    else:
+                        # API 返回错误，检查是否可重试
+                        error_code = data.get("code")
+                        error_msg = data.get("msg", "未知错误")
+
+                        retryable_codes = [99991663, 99991400, 99991398]
+                        if error_code in retryable_codes and attempt < max_retries - 1:
+                            print(f"⚠️ 图片上传限流 ({error_code})，{retry_delay}秒后重试...")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            print(f"✗ 图片上传失败: [{error_code}] {error_msg}")
+                            return None
+                else:
+                    # HTTP 错误
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ 图片上传 HTTP {response.status_code}，{retry_delay}秒后重试...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        print(f"✗ 图片上传请求失败: HTTP {response.status_code}")
+                        return None
+
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ 图片上传超时，{retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print("✗ 图片上传超时")
+                    return None
+
+            except Exception as e:
+                print(f"✗ 图片上传异常: {e}")
+                return None
+
+        return None
+
+    def send_image_message(self, image_path_or_key, max_retries=3, retry_delay=1):
+        """发送单张图片消息
+
+        Args:
+            image_path_or_key: 图片路径或 image_key
+            max_retries: 最大重试次数（默认3次）
+            retry_delay: 重试延迟秒数（默认1秒）
+
+        Returns:
+            bool: 发送是否成功
+        """
+        import time
+
+        # 如果是路径，先上传获取 key
+        if isinstance(image_path_or_key, str) and os.path.exists(image_path_or_key):
+            image_key = self.upload_image(image_path_or_key, max_retries, retry_delay)
+            if not image_key:
                 return False
         else:
-            print(f"✗ 请求失败: {response.status_code}")
-            return False
+            image_key = image_path_or_key
+
+        url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+
+        headers = {
+            "Authorization": f"Bearer {self.app_access_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "receive_id": self.user_open_id,
+            "msg_type": "image",
+            "content": json.dumps({"image_key": image_key})
+        }
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("code") == 0:
+                        print("✓ 图片消息已发送到飞书")
+                        return True
+                    else:
+                        error_code = data.get("code")
+                        error_msg = data.get("msg", "未知错误")
+
+                        retryable_codes = [99991663, 99991400, 99991398]
+                        if error_code in retryable_codes and attempt < max_retries - 1:
+                            print(f"⚠️ 发送限流 ({error_code})，{retry_delay}秒后重试...")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            print(f"✗ 发送失败: [{error_code}] {error_msg}")
+                            return False
+                else:
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ HTTP {response.status_code}，{retry_delay}秒后重试...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        print(f"✗ 请求失败: HTTP {response.status_code}")
+                        return False
+
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ 请求超时，{retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    print("✗ 请求超时")
+                    return False
+
+            except Exception as e:
+                print(f"✗ 发送异常: {e}")
+                return False
+
+        return False
+
+    def send_image_batch(self, image_paths, delay=1):
+        """批量发送多张图片
+
+        Args:
+            image_paths: 图片文件路径列表
+            delay: 每张图片之间的间隔秒数（默认1秒）
+
+        Returns:
+            dict: 发送结果统计
+        """
+        import time
+
+        results = {
+            'success': 0,
+            'failed': 0,
+            'total': len(image_paths),
+            'details': []
+        }
+
+        for i, image_path in enumerate(image_paths, 1):
+            print(f"\n发送图片 {i}/{len(image_paths)}: {os.path.basename(image_path)}")
+
+            success = self.send_image_message(image_path)
+
+            if success:
+                results['success'] += 1
+                results['details'].append({'path': image_path, 'status': 'success'})
+            else:
+                results['failed'] += 1
+                results['details'].append({'path': image_path, 'status': 'failed'})
+
+            # 间隔 delay 秒，避免限流
+            if i < len(image_paths):
+                time.sleep(delay)
+
+        print(f"\n✓ 图片发送完成: 成功 {results['success']}/{results['total']}")
+
+        return results
 
 
 def test_notification():

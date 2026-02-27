@@ -13,16 +13,16 @@ server:
   port: 5001
   debug: false
 
-# 技能路径
+# 技能路径（已修复：指向正确的 DMS/skills 目录）
 skills:
-  media_crawler: "~/.claude/skills/media-crawler"
-  feishu_universal: "~/.claude/skills/feishu-universal"
-  wuxin_collector: "~/.claude/skills/wuxin-sleep-hotspot-collector"
+  media_crawler: "~/Desktop/DMS/skills/media-crawler"
+  feishu_universal: "~/Desktop/DMS/skills/feishu-universal"
+  wuxin_collector: "~/Desktop/DMS/skills/wuxin-sleep-hotspot-collector"
 
-# 数据存储
+# 数据存储（已修复：指向实际位置）
 data:
-  collection_dir: "~/.claude/skills/feishu-bot/data/collections"
-  log_dir: "~/.claude/skills/feishu-bot/logs"
+  collection_dir: "~/Desktop/DMS/skills/feishu-bot/data/collections"
+  log_dir: "~/Desktop/DMS/skills/feishu-bot/logs"
 
 # MediaCrawler配置
 mediacrawler:

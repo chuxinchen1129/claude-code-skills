@@ -1,17 +1,21 @@
 ---
 name: baogaomiao
-description: 阅读总结多种文档（PDF/Word/PPT/网页），分3步输出：中文标题（2026开头）、英文标题、小红书笔记，生成后自动发送到飞书。当用户提到"报告喵"或"阅读PDF"、"总结文档"、"生成小红书笔记"、"读一下这个"、"用baogaomiao"时使用。支持任务监听和自动处理。
-version: 2.3.0
+description: 阅读总结多种文档（PDF/Word/PPT/网页），分3步输出：中文标题（2026开头）、英文标题、小红书笔记，生成后自动发送到飞书。支持PDF截图（跳过前2页和最后5页，随机截6张），截图自动发送到飞书手机。每次生成截图时自动清理该PDF的旧截图。**NEW v2.9**：东方财富研报爬虫升级，支持临时目录、页数过滤、去重选择。**NEW v2.8**：社论风封面生成！处理 PDF 后自动生成现代社论风格封面图片（3:4比例），并与其他内容一起发送到飞书。**NEW v2.7**：自动重命名 PDF 文件为标准格式（MMDD-Year+报告名称.pdf）。当用户提到"报告喵"或"阅读PDF"、"总结文档"、"生成小红书笔记"、"读一下这个"、"用baogaomiao"时使用。支持任务监听和自动处理。
+version: 2.9.0
 created: 2026-02-13
-updated: 2026-02-24
+updated: 2026-02-27
 
 ---
 
-# 文档总结 - 小红书笔记生成 v2.3
+# 文档总结 - 小红书笔记生成 v2.7
 
 你是一个高效的文档阅读和内容总结专家，专注于将各类文档转化为吸引人的小红书笔记，**生成后自动发送到飞书**。
 
-## 默认配置
+**NEW v2.8**：社论风封面生成！处理 PDF 后自动生成现代社论风格封面图片（3:4比例），并与其他内容一起发送到飞书。
+
+**NEW v2.7**：自动重命名 PDF 文件！读取 PDF 后自动重命名为标准格式 `MMDD-Year+报告名称.pdf`。
+
+**NEW v2.6**：自动清理旧截图！每次生成截图时，自动删除该PDF的旧截图，确保只保留最新一天的截图。
 
 ### 报告喵文件夹路径 ⭐ FIXED (v2.3)
 
@@ -69,6 +73,251 @@ else:
 报告喵                                    # 使用报告喵文件夹
 报告喵 /Users/echochen/Documents/PDFs       # 处理指定文件夹
 报告喵 ~/Documents/report.pdf                # 处理指定文件
+```
+
+### 新增功能 v2.7 ⭐ NEW
+
+#### PDF 自动重命名 📁
+
+读取 PDF 后，自动将文件重命名为标准格式，方便归档和管理。
+
+**命名格式**：`MMDD-Year+报告名称.pdf`
+
+**命名规则**：
+- **MMDD**：当前日期（月日），如 `0227`
+- **Year**：年份（从标题提取，默认2026）
+- **报告名称**：12个中文字以内，体现行业或品牌
+
+**示例**：
+```
+0227-2026珀莱雅化妆品研究报告.pdf
+0227-2026母婴行业趋势报告.pdf
+0227-2026连锁经营数据报告.pdf
+```
+
+**重命名时机**：
+- 在 PDF 解析完成后
+- 在生成中文标题后
+- **在飞书发送之前**（确保文件名已更新）
+
+**命令行测试**：
+```bash
+# 只生成文件名（不重命名）
+python3 scripts/file_namer.py "🎯2026 母婴连锁经营数据报告 —— 逆势增长密码"
+
+# 生成文件名并重命名
+python3 scripts/file_namer.py "🎯2026 母婴连锁经营数据报告" /path/to/file.pdf
+
+# 试运行模式（不实际重命名）
+python3 scripts/file_namer.py "🎯2026 母婴连锁经营数据报告" /path/to/file.pdf --dry-run
+```
+
+**Python 调用**：
+```python
+from scripts.file_namer import PDFRenamer
+
+renamer = PDFRenamer()
+
+# 生成新文件名
+new_name = renamer.generate_filename(
+    chinese_title="🎯2026 母婴连锁经营数据报告 —— 逆势增长密码"
+)
+# 结果：0227-2026母婴连锁经营数据报告.pdf
+
+# 执行重命名
+result = renamer.rename_pdf(
+    old_path="/path/to/original.pdf",
+    new_name="0227-2026母婴连锁经营数据报告.pdf"
+)
+
+if result['success']:
+    print(f"重命名成功: {result['old_path']} -> {result['new_path']}")
+```
+
+**安全措施**：
+- 检查目标文件是否存在
+- 文件名冲突时自动添加序号（如 `_1`, `_2`）
+- 失败时记录日志但不中断主流程
+
+### 新增功能 v2.8
+
+#### 社论风封面生成 📰
+
+处理 PDF 后自动生成现代社论风格封面图片（3:4比例），并与其他内容一起发送到飞书。
+
+**封面参数提取规则**：
+
+| 参数 | 提取来源 | 默认值 |
+|------|---------|--------|
+| source | 从封面页OCR或文字提取 | "研究报告" |
+| page_count | PDFExtractor.total_pages | 自动获取 |
+| chinese_title | 第一步生成的中文标题（移除emoji） | - |
+| english_title | 第二步生成的英文标题（转大写） | - |
+| year | 从中文标题提取 `🎯YYYY` 格式 | 当前年份 |
+| highlight_title | 小红书笔记的"梗概" | "核心要点" |
+| summary_text | 小红书笔记的"关键词" | 根据标题生成 |
+| report_type | 报告类型 | "行业研究报告" |
+| number | 自动生成 | MMDD 格式 |
+
+**提取方式**：
+
+1. **source（来源）**：
+   - 优先从PDF封面页提取文字（pymupdf的 `get_text()`）
+   - 提取第一页的前500字符，匹配机构名称模式
+   - 模式：`xxx研究院`、`xxx咨询`、`xxx证券` 等
+   - 如果提取失败，使用默认值"研究报告"
+
+2. **year（年份）**：
+   - 从中文标题提取 `🎯2026` 格式
+   - 正则表达式：`🎯(\d{4})`
+   - 如果提取失败，使用 `datetime.now().year`
+
+3. **highlight_title**：
+   - 直接使用小红书笔记的"梗概"内容
+
+4. **summary_text**：
+   - 直接使用小红书笔记的"关键词"内容
+
+**长度限制规则**：
+
+| 参数 | 限制 |
+|------|------|
+| 中文标题 | 每行最多8字 |
+| 英文标题 | 最多25个字符 |
+| highlight_title | 最多12字 |
+| summary_text | 最多40字 |
+
+**字体设置参考**：
+- 中文标题：`font-noto-serif font-black text-[3.6rem]` (57.6px)
+- 英文标题：`text-accent font-bold tracking-wider`
+- highlight标题：`font-noto-serif font-bold text-xl`
+- 其他文本：`text-base`、`text-sm`、`text-xs`
+
+**使用示例**：
+```python
+from scripts.editorial_cover import EditorialCoverGenerator
+from scripts.html_to_image import HTMLToImageConverter
+
+# 1. 提取PDF信息
+extractor = PDFExtractor("document.pdf")
+result = extractor.extract()
+page_count = result['total_pages']
+source = extractor.extract_source()  # 新增方法
+
+# 2. 生成HTML封面
+generator = EditorialCoverGenerator()
+cover_result = generator.generate_cover(
+    source=source,
+    page_count=page_count,
+    chinese_title=chinese_title,
+    english_title=english_title,
+    year=year,
+    highlight_title=genggai,  # 梗概
+    summary_text=guanjianci  # 关键词
+)
+
+# 3. 转换为PNG
+converter = HTMLToImageConverter()
+png_result = converter.convert_to_xhs_style(
+    html_path=cover_result['path']
+)
+
+# 4. 发送到飞书
+sender.send_image(png_result['path'])
+```
+
+**封面图片发送位置**：
+- 在PDF截图之后发送
+- 消息顺序：小红书笔记 → 6张PDF截图 → 封面图
+
+**消息接收顺序更新**：
+```
+1. 小红书笔记
+2-7. 6张PDF截图
+8. 封面图
+```
+
+### 新增功能 v2.5
+
+#### PDF 截图自动发送到飞书 📱
+
+处理 PDF 时生成的 6 张截图会**自动发送到飞书**，无需手动操作：
+
+**自动发送流程**：
+1. PDF 解析完成，生成 6 张截图
+2. 文本笔记发送到飞书（3 条消息）
+3. **自动发送** 6 张截图（6 条图片消息）
+4. 用户在手机飞书 APP 中可直接查看
+
+**消息接收顺序**：
+```
+1. 中文标题
+2. 英文标题
+3. 小红书笔记
+4-9. 6 张 PDF 截图
+```
+
+### 新增功能 v2.4
+
+#### PDF 截图功能 📷
+
+在解析 PDF 文档时，自动截取 **6 张随机页面**作为参考图片：
+
+**截图策略**：
+- 跳过前2页
+- 跳过最后5页
+- 从剩余页面中随机选择 6 页
+- 截取完整 A4 版面（全页面截图）
+- 2x 缩放，retina 质量输出
+
+**使用方式**：
+```python
+from scripts.pdf_extractor import PDFExtractor
+
+# 启用截图
+extractor = PDFExtractor(
+    "document.pdf",
+    enable_screenshots=True,
+    screenshot_dir="/path/to/screenshots",  # 可选，默认为 skill/screenshots/
+    zoom=2.0  # 可选，默认 2.0
+)
+
+result = extractor.extract(max_pages=5)
+
+if result['success']:
+    print(result['text'])  # 提取的文本
+    if 'screenshots' in result:
+        for shot in result['screenshots']:
+            print(f"第 {shot['page']} 页: {shot['path']}")
+```
+
+**命令行使用**：
+```bash
+# 启用截图
+python3 scripts/pdf_extractor.py document.pdf --enable-screenshots
+
+# 指定截图目录
+python3 scripts/pdf_extractor.py document.pdf -s --dir /path/to/screenshots
+
+# 调整缩放倍数
+python3 scripts/pdf_extractor.py document.pdf -s --zoom 3.0
+```
+
+**返回结构**：
+```python
+{
+    'success': True,
+    'lib': 'pymupdf',
+    'total_pages': 20,
+    'extracted_pages': 5,
+    'text': '...',
+    'screenshots': [
+        {'page': 3, 'path': '/path/to/screenshot_1.png'},
+        {'page': 7, 'path': '/path/to/screenshot_2.png'},
+        # ... 共 6 张
+    ],
+    'screenshot_count': 6
+}
 ```
 
 ### 新增功能 v2.1
@@ -277,6 +526,9 @@ result = sender.send(content, auto_send=True)  # 自动发送
   • 如果有自定义路径则使用自定义路径
 ↓
 [步骤2：PDF解析] 使用 pdf_extractor.py 自动检测并提取文本
+  • 📷 启用截图功能（跳过前2页+最后5页，随机截6张）
+  • 使用 pymupdf 渲染完整 A4 页面为 PNG
+  • 截图保存到 ~/.claude/skills/baogaomiao/screenshots/
 ↓
 [步骤3：文档扫描] 快速扫描文档：摘要目录 + 核心章节
 ↓
@@ -287,8 +539,10 @@ result = sender.send(content, auto_send=True)  # 自动发送
 输出第三步：小红书笔记（紧凑格式模板）
 ↓
 [步骤4：飞书发送] 使用 feishu_sender.py 发送到飞书
+  • 文本笔记发送（3条消息：中文标题、英文标题、笔记）
+  • 📷 截图自动发送（6张图片消息）
 ↓
-完成：用户可在飞书中查看完整笔记
+完成：用户可在飞书手机 APP 中查看完整笔记和截图
 ```
 
 ### 飞书发送配置
@@ -308,6 +562,7 @@ result = sender.send(content, auto_send=True)  # 自动发送
 4. **数据真实**：保留原文关键数据，不要编造
 5. **速度优先**：快速响应，不解释过程
 6. **自动飞书发送**（v2.1）：生成笔记后自动发送，无需手动触发
+7. **截图自动发送**（v2.5）：PDF 解析时生成的 6 张截图会自动发送到飞书，手机 APP 可直接查看
 
 ## 参考示例
 
@@ -367,6 +622,64 @@ result = sender.send(content, auto_send=True)  # 自动发送
 ---
 #### 修复记录
 
+**社论风封面生成功能** (v2.8 - 2026-02-27)：
+- ✅ 添加 `extract_source()` 方法到 pdf_extractor.py：从封面页提取机构名称
+- ✅ 更新 editorial_cover.py：封面参数来源明确
+- ✅ 更新 feishu_sender.py：移除中英文标题单独发送，只发送小红书笔记
+- ✅ 更新 baogaomiao_task_processor.py：集成封面生成和发送逻辑
+- ✅ 飞书消息接收顺序更新：小红书笔记 → 6张PDF截图 → 封面图
+
+**使用效果**：
+```python
+# PDF 处理完成后，自动发送 8 条飞书消息：
+# 1. 小红书笔记
+# 2-7. 6 张 PDF 截图
+# 8. 封面图
+
+extractor = PDFExtractor("document.pdf", enable_screenshots=True)
+result = extractor.extract()
+# 封面和截图会自动生成并发送到飞书
+```
+
+**截图自动发送功能** (v2.5 - 2026-02-25)：
+- ✅ 添加 `upload_image()` 方法到 feishu_bot_notifier.py：上传图片到飞书获取 image_key
+- ✅ 添加 `send_image_message()` 方法到 feishu_bot_notifier.py：发送单张图片消息
+- ✅ 添加 `send_image_batch()` 方法到 feishu_bot_notifier.py：批量发送多张图片（支持限流重试）
+- ✅ 添加 `send_screenshots()` 方法到 feishu_sender.py：封装截图发送逻辑
+- ✅ 更新 baogaomiao_task_processor.py：文本发送成功后自动发送截图
+- ✅ 飞书消息接收顺序：中文标题 → 英文标题 → 小红书笔记 → 6张截图
+
+**使用效果**：
+```python
+# PDF 处理完成后，自动发送 9 条飞书消息：
+# 1-3. 文本笔记（中文标题、英文标题、小红书笔记）
+# 4-9. 6 张 PDF 截图
+
+extractor = PDFExtractor("document.pdf", enable_screenshots=True)
+result = extractor.extract()
+# 截图会自动上传并发送到飞书
+```
+
+**PDF 截图功能** (v2.4 - 2026-02-25)：
+- ✅ 添加 PDF 截图功能，使用 pymupdf 原生渲染
+- ✅ 固定截取 6 张图片，跳过前2页和最后5页
+- ✅ 从剩余页面中随机选择，截取完整 A4 版面
+- ✅ 2x 缩放输出 retina 质量 PNG
+- ✅ 截图保存到 `~/.claude/skills/baogaomiao/screenshots/`
+- ✅ 更新 pdf_extractor.py 支持截图参数
+- ✅ 更新 baogaomiao_task_processor.py 集成截图功能
+
+**使用方法**：
+```python
+# 启用截图
+extractor = PDFExtractor("document.pdf", enable_screenshots=True)
+result = extractor.extract()
+
+# 访问截图
+for shot in result['screenshots']:
+    print(f"第 {shot['page']} 页: {shot['path']}")
+```
+
 **文件查找问题修复** (v2.3 - 2026-02-24)：
 - ✅ 创建 `get_latest_pdf.py` 脚本，专门处理PDF文件查找
 - ✅ 使用 `Path.glob()` 而非 shell glob，避免 shell 扩展问题
@@ -402,4 +715,75 @@ python3 scripts/get_latest_pdf.py
 - ✅ 验证测试：成功发送 3 条消息到飞书
 
 EOF
+
+---
+
+## 东方财富研报爬虫 ⭐ NEW (v2.9)
+
+**位置**：`bin/crawl_huaxin_robots.py`
+
+**功能**：爬取华鑫证券关于机器人赛道的研报，支持智能过滤和去重。
+
+### 工作流程
+
+```
+爬取研报列表 → 下载到临时目录 → 页数过滤 → 去重选择 → 复制到报告喵
+```
+
+### 核心特性
+
+| 特性 | 说明 |
+|------|------|
+| 临时目录 | 下载的PDF先存到 `temp/eastmoney_downloads/` |
+| 页数过滤 | 少于10页的PDF自动删除 |
+| 去重选择 | 同一天多份时支持飞书/对话框选择 |
+| 最终操作 | 只把选中的一份复制到报告喵文件夹 |
+| 自动清理 | 选择完成后自动清理临时文件 |
+
+### 配置
+
+```python
+# 脚本中的配置常量
+TEMP_DIR = Path("/Users/echochen/Desktop/DMS/temp/eastmoney_downloads")
+FINAL_DIR = Path("~/Library/Mobile Documents/com~apple~CloudDocs/家人共享/报告喵").expanduser()
+MIN_PAGE_COUNT = 10  # 最少页数阈值
+```
+
+### 使用方法
+
+```bash
+# 爬取最近7天的研报（默认）
+python3 bin/crawl_huaxin_robots.py
+
+# 爬取最近30天的研报
+python3 bin/crawl_huaxin_robots.py --days 30
+```
+
+### 飞书反馈格式
+
+当发现多份研报时，会创建选择文件供飞书使用：
+
+```json
+// temp/eastmoney_downloads/selection_result.json
+{
+  "timestamp": "2026-02-27T10:00:00",
+  "options": [
+    {"index": 1, "title": "中国工控领域领先企业积极开拓机器人赛道", "pages": 59},
+    {"index": 2, "title": "华鑫证券机器人赛道深度分析", "pages": 42}
+  ],
+  "choice": null  // 飞书回复时填充：{"choice": 1}
+}
+```
+
+飞书回复格式：
+```json
+{"choice": 1}
+```
+
+### 自动选择逻辑
+
+当不需要用户选择时，自动选择规则：
+- 只有1份 → 直接保留
+- 多份时超时 → 选择页数最多的
+- 用户取消 → 跳过本次操作
 

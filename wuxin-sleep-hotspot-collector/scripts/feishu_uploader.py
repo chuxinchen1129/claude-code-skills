@@ -25,6 +25,16 @@ from datetime import datetime
 from pathlib import Path
 import argparse
 
+# 导入飞书路径模块
+_dms_root = Path(__file__).parent.parent.parent.parent
+_feishu_scripts = _dms_root / 'skills' / 'feishu-universal' / 'scripts'
+sys.path.insert(0, str(_feishu_scripts))
+try:
+    from feishu_paths import FeishuPaths
+    USE_FEISHU_PATHS = True
+except ImportError:
+    USE_FEISHU_PATHS = False
+
 
 class FeishuUploader:
     """飞书上传器"""
@@ -32,15 +42,21 @@ class FeishuUploader:
     def __init__(self):
         """初始化上传器"""
         self.skill_dir = Path(__file__).parent.parent
-        self.feishu_scripts_dir = Path("/Users/echochen/.claude/skills/feishu-automation-v2/scripts")
 
-        # 检查飞书脚本是否存在
-        self.feishu_user_auto = self.feishu_scripts_dir / "feishu_user_auto.py"
-        self.feishu_oauth_setup = self.feishu_scripts_dir / "feishu_oauth_setup.py"
-        self.feishu_bot_notifier = self.feishu_scripts_dir / "feishu_bot_notifier.py"
-
-        # 检查配置文件
-        self.feishu_config = Path.home() / ".feishu_user_config.json"
+        # 使用统一的飞书路径管理
+        if USE_FEISHU_PATHS:
+            self.feishu_scripts_dir = FeishuPaths.SCRIPTS
+            self.feishu_user_auto = FeishuPaths.USER_AUTO
+            self.feishu_oauth_setup = FeishuPaths.OAUTH_SETUP
+            self.feishu_bot_notifier = FeishuPaths.BOT_NOTIFIER
+            self.feishu_config = FeishuPaths.USER_CONFIG
+        else:
+            # 回退到相对路径
+            self.feishu_scripts_dir = _feishu_scripts
+            self.feishu_user_auto = self.feishu_scripts_dir / "feishu_user_auto.py"
+            self.feishu_oauth_setup = self.feishu_scripts_dir / "feishu_oauth_setup.py"
+            self.feishu_bot_notifier = self.feishu_scripts_dir / "feishu_bot_notifier.py"
+            self.feishu_config = Path.home() / ".feishu_user_config.json"
 
     def _load_config(self):
         """加载飞书配置

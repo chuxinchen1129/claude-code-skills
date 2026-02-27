@@ -1,0 +1,61 @@
+# 悟昕视频脚本生成器配置
+
+# 引用共享配置
+include: ../../03_WUXIN_CONTENT/assets/config.yaml
+
+# ==================== 技能特定配置 ====================
+
+defaults:
+  # 脚本参数
+  duration: 30                      # 脚本时长（秒）
+  structure: 4_segment              # 4段式结构
+  brand_integration: soft           # 品牌植入程度: soft/medium/hard
+
+  # API 配置
+  api:
+    provider: zhipuai               # API 提供商
+    model: glm-4.7                  # 模型名称
+    api_key_env: ZHIPUAI_API_KEY    # 环境变量名
+    max_tokens: 3000
+    temperature: 0.7
+    timeout: 120
+
+  # 生成参数
+  base_topics: 10                   # 基础选题数
+  fission_per_topic: 5              # 每个选题裂变数
+  target_count: 18                  # 目标筛选数
+  passing_line: 25                  # 评分及格线
+
+  # 评分权重
+  scoring_weights:
+    marketing_node_relevance: 3    # 营销节点关联度权重
+    scene_diversity: 2             # 场景多样化权重
+    hook_strength: 2               # 钩子强度权重
+    emotional_resonance: 1         # 情感共鸣权重
+    brand_consistency: 1           # 品牌一致性权重
+    data_support: 1                # 数据支撑权重
+
+# ==================== 资源路径 ====================
+
+resources:
+  # 品牌资产（引用共享）
+  brand:
+    selling_points: ../../03_WUXIN_CONTENT/assets/brand/selling-points.md
+    knowledge_base: ../../03_WUXIN_CONTENT/assets/brand/knowledge-base.md
+
+  # 模板（引用共享）
+  templates:
+    video_script: ../../03_WUXIN_CONTENT/assets/templates/video-script/
+
+# ==================== 输出配置 ====================
+
+output:
+  dir: ./output
+  format: excel
+  encoding: utf-8
+
+# 文件命名模板
+naming:
+  topic_pool: "{node}_话题池.xlsx"
+  rated_topics: "{node}_Top{count}选题.xlsx"
+  final_scripts: "{node}_Top{count}脚本_标准格式版.xlsx"
