@@ -26,6 +26,7 @@ class FeishuBotNotifier:
         self.app_id = config.get('app_id')
         self.app_secret = config.get('app_secret')
         self.user_open_id = config.get('user_open_id')
+        self.chat_id = config.get('chat_id', self.user_open_id)  # 优先使用 chat_id
 
         self.app_access_token = None
         self.base_url = "https://open.feishu.cn/open-apis"
@@ -48,10 +49,13 @@ class FeishuBotNotifier:
             data = response.json()
             if data.get("code") == 0:
                 self.app_access_token = data.get("app_access_token")
+                print(f"✓ app_access_token 获取成功: {self.app_access_token[:20] if self.app_access_token else 'None'}")
             else:
-                raise Exception(f"获取 token 失败: {data.get('msg')}")
+                error_code = data.get('code')
+                error_msg = data.get('msg', '未知错误')
+                raise Exception(f"获取 token 失败: [{error_code}] {error_msg}")
         else:
-            raise Exception(f"请求失败: {response.status_code}")
+            raise Exception(f"请求失败: HTTP {response.status_code}")
 
     def send_message(self, content, max_retries=3, retry_delay=1):
         """发送消息到用户
@@ -66,7 +70,15 @@ class FeishuBotNotifier:
         """
         import time
 
-        url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+        # 优先使用 chat_id，确保消息和监听在同一聊天中
+        if self.chat_id and self.chat_id != self.user_open_id:
+            # 使用 chat_id 发送消息
+            url = f"{self.base_url}/im/v1/messages?receive_id_type=chat_id"
+            receive_id = self.chat_id
+        else:
+            # 回退到 user_open_id
+            url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+            receive_id = self.user_open_id
 
         headers = {
             "Authorization": f"Bearer {self.app_access_token}",
@@ -74,7 +86,7 @@ class FeishuBotNotifier:
         }
 
         payload = {
-            "receive_id": self.user_open_id,
+            "receive_id": receive_id,
             "msg_type": "text",
             "content": json.dumps({"text": content})
         }

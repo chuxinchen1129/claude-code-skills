@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-飞书自动化工具 v2.0 - 用户身份版
-使用 user_access_token 创建资源，确保用户拥有完整权限
+飞书自动化工具 v3.0 - 统一 tenant_access_token 版本
 
 核心改进：
-- 使用 user_access_token 而不是 app_access_token
-- 创建的资源，用户自动成为所有者
-- 支持自动刷新 token
-- 使用机器人身份发送通知（混合模式）
+- 统一使用 tenant_access_token (app_access_token/internal)
+- 删除 OAuth 流程，无需人工授权
+- 支持创建新 Base
+- 支持直接导入到目标表格
+- 字段自动创建
 """
 
 import requests
@@ -15,7 +15,7 @@ import json
 import pandas as pd
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 
@@ -27,12 +27,12 @@ class FeishuBotNotifier:
         self.app_id = app_id
         self.app_secret = app_secret
         self.user_open_id = user_open_id
-        self.app_access_token = None
+        self.tenant_access_token = None
         self.base_url = "https://open.feishu.cn/open-apis"
-        self._get_app_token()
+        self._get_tenant_token()
 
-    def _get_app_token(self):
-        """获取 app_access_token"""
+    def _get_tenant_token(self):
+        """获取 tenant_access_token"""
         url = f"{self.base_url}/auth/v3/app_access_token/internal"
         payload = {"app_id": self.app_id, "app_secret": self.app_secret}
         response = requests.post(url, json=payload)
@@ -40,13 +40,19 @@ class FeishuBotNotifier:
         if response.status_code == 200:
             data = response.json()
             if data.get("code") == 0:
-                self.app_access_token = data.get("app_access_token")
+                self.tenant_access_token = data.get("app_access_token")
+                return
+        raise Exception(f"获取 tenant_access_token 失败")
 
     def send_notification(self, content):
         """发送通知消息"""
+        # 确保token有效
+        if not self.tenant_access_token:
+            self._get_tenant_token()
+
         url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
         headers = {
-            "Authorization": f"Bearer {self.app_access_token}",
+            "Authorization": f"Bearer {self.tenant_access_token}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -63,8 +69,8 @@ class FeishuBotNotifier:
         return False
 
 
-class FeishuUserClient:
-    """飞书用户身份客户端"""
+class FeishuTenantClient:
+    """飞书 tenant_access_token 客户端"""
 
     def __init__(self, config_path="~/.feishu_user_config.json"):
         """初始化客户端
@@ -79,83 +85,26 @@ class FeishuUserClient:
             with open(config_path, 'r') as f:
                 self.config = json.load(f)
         else:
-            raise FileNotFoundError(f"配置文件不存在: {config_path}\n请先完成 OAuth 授权流程")
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
         self.app_id = self.config.get('app_id')
         self.app_secret = self.config.get('app_secret')
-        self.user_access_token = self.config.get('user_access_token')
-        self.refresh_token = self.config.get('refresh_token')
         self.user_open_id = self.config.get('user_open_id')
-        self.expires_at = self.config.get('expires_at', 0)
-        self.auth_time = self.config.get('auth_time', int(time.time()))  # 授权时间
+        self.chat_id = self.config.get('chat_id', self.user_open_id)  # 兼容旧配置
+        self.folder_token = self.config.get('folder_token', '')
+        self.target_table = self.config.get('target_table', {})
 
-        self.app_access_token = None
+        self.tenant_access_token = None
         self.base_url = "https://open.feishu.cn/open-apis"
 
-        # 检查 refresh_token 是否即将过期（30天有效期）
-        self._check_refresh_token_expiry()
+        # 初始化时获取 token
+        self._get_tenant_token()
 
-        # 检查并刷新 token
-        self._ensure_valid_token()
+        # 创建通知器
+        self.notifier = FeishuBotNotifier(self.app_id, self.app_secret, self.user_open_id)
 
-    def _check_refresh_token_expiry(self):
-        """检查 refresh_token 是否即将过期，提前提醒"""
-        now = int(time.time())
-        # refresh_token 有效期 30 天
-        refresh_expires_at = self.auth_time + 30 * 24 * 60 * 60
-        remaining_days = (refresh_expires_at - now) / (24 * 60 * 60)
-
-        # 创建机器人通知器
-        notifier = FeishuBotNotifier(self.app_id, self.app_secret, self.user_open_id)
-
-        if remaining_days < 3:
-            print(f"\n{'='*60}")
-            print(f"⚠️  警告：refresh_token 即将过期（剩余 {remaining_days:.1f} 天）")
-            print(f"{'='*60}")
-            print(f"为了避免影响使用，建议尽快重新授权：")
-            print(f"  python3 test_feishu_oauth.py")
-            print(f"或运行自动版：")
-            print(f"  python3 feishu_oauth_setup.py")
-            print(f"{'='*60}\n")
-
-            # 发送飞书消息通知（使用机器人身份）
-            try:
-                expire_date = datetime.fromtimestamp(refresh_expires_at).strftime('%Y-%m-%d')
-                message = f"""⚠️ 飞书 Token 即将过期提醒
-
-你的飞书 refresh_token 即将过期：
-- 剩余天数：{remaining_days:.1f} 天
-- 过期时间：{expire_date}
-
-建议尽快重新授权：
-  python3 feishu_oauth_setup.py
-
-避免影响飞书自动化功能的使用。"""
-                if notifier.send_notification(message):
-                    print("✓ 已发送飞书消息提醒")
-            except Exception as e:
-                print(f"⚠️  发送飞书消息失败: {e}")
-
-        elif remaining_days < 7:
-            print(f"💡 提醒：refresh_token 将在 {remaining_days:.1f} 天后过期")
-
-            # 发送飞书消息提醒（使用机器人身份）
-            try:
-                expire_date = datetime.fromtimestamp(refresh_expires_at).strftime('%Y-%m-%d')
-                message = f"""💡 飞书 Token 过期提醒
-
-你的飞书 refresh_token 将在 {remaining_days:.1f} 天后过期：
-- 过期时间：{expire_date}
-
-建议本周内重新授权：
-  python3 feishu_oauth_setup.py"""
-                if notifier.send_notification(message):
-                    print("✓ 已发送飞书消息提醒")
-            except Exception as e:
-                print(f"⚠️  发送飞书消息失败: {e}")
-
-    def get_app_access_token(self):
-        """获取 app_access_token（用于刷新 user_access_token）"""
+    def _get_tenant_token(self):
+        """获取 tenant_access_token"""
         url = f"{self.base_url}/auth/v3/app_access_token/internal"
 
         payload = {
@@ -168,77 +117,22 @@ class FeishuUserClient:
         if response.status_code == 200:
             data = response.json()
             if data.get("code") == 0:
-                self.app_access_token = data.get("app_access_token")
-                return self.app_access_token
+                self.tenant_access_token = data.get("app_access_token")
+                return
             else:
-                raise Exception(f"获取 app_access_token 失败: {data.get('msg')}")
+                raise Exception(f"获取 tenant_access_token 失败: {data.get('msg')}")
         else:
             raise Exception(f"请求失败: {response.status_code}")
 
-    def _ensure_valid_token(self):
-        """确保 user_access_token 有效"""
-        now = time.time()
+    def _ensure_token(self):
+        """确保 token 有效（tenant_token 2小时有效，可以重新获取）"""
+        if not self.tenant_access_token:
+            self._get_tenant_token()
 
-        # 如果 token 还有 5 分钟过期，提前刷新
-        if self.expires_at - now < 300:
-            print("⚠️  user_access_token 即将过期，正在刷新...")
-            self.refresh_user_token()
-
-    def refresh_user_token(self):
-        """刷新 user_access_token"""
-        if not self.refresh_token:
-            raise Exception("没有 refresh_token，无法刷新。请重新执行 OAuth 授权")
-
-        # 先获取 app_access_token
-        if not self.app_access_token:
-            self.get_app_access_token()
-
-        url = f"{self.base_url}/authen/v1/oidc/refresh_access_token"
-
-        headers = {
-            "Authorization": f"Bearer {self.app_access_token}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token
-        }
-
-        response = requests.post(url, headers=headers, json=payload)
-
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("code") == 0:
-                token_data = data.get("data")
-
-                # 更新 token
-                self.user_access_token = token_data.get("access_token")
-                self.refresh_token = token_data.get("refresh_token")
-                self.expires_at = time.time() + token_data.get("expires_in", 7200)
-
-                # 保存到配置文件
-                self._save_config()
-
-                print(f"✓ Token 刷新成功，有效期至: {datetime.fromtimestamp(self.expires_at)}")
-            else:
-                raise Exception(f"刷新 token 失败: {data.get('msg')}")
-        else:
-            raise Exception(f"请求失败: {response.status_code}")
-
-    def _save_config(self):
-        """保存配置到文件"""
-        config_path = os.path.expanduser("~/.feishu_user_config.json")
-
-        self.config['user_access_token'] = self.user_access_token
-        self.config['refresh_token'] = self.refresh_token
-        self.config['expires_at'] = self.expires_at
-
-        with open(config_path, 'w') as f:
-            json.dump(self.config, f, indent=2, ensure_ascii=False)
+    # ==================== Base 操作 ====================
 
     def create_base(self, name, folder_token=""):
-        """创建多维表格 Base（以用户身份）
+        """创建多维表格 Base（使用应用身份）
 
         Args:
             name: Base 名称
@@ -247,19 +141,24 @@ class FeishuUserClient:
         Returns:
             dict: Base 信息
         """
-        self._ensure_valid_token()
+        self._ensure_token()
 
         url = f"{self.base_url}/bitable/v1/apps"
 
         headers = {
-            "Authorization": f"Bearer {self.user_access_token}",
+            "Authorization": f"Bearer {self.tenant_access_token}",
             "Content-Type": "application/json"
         }
 
         payload = {
             "name": name,
-            "folder_token": folder_token
         }
+
+        # 如果指定了 folder_token，添加到 payload
+        if folder_token:
+            payload["folder_token"] = folder_token
+        elif self.folder_token:
+            payload["folder_token"] = self.folder_token
 
         response = requests.post(url, headers=headers, json=payload)
 
@@ -269,7 +168,7 @@ class FeishuUserClient:
                 app = data.get("data", {}).get("app")
                 print(f"✓ 成功创建 Base: {name}")
                 print(f"  App Token: {app.get('app_token')}")
-                print(f"  所有者: {self.user_open_id}（你）")
+                print(f"  所有者: 应用（使用 tenant_access_token）")
                 return app
             else:
                 raise Exception(f"创建 Base 失败: {data.get('msg')}")
@@ -285,12 +184,12 @@ class FeishuUserClient:
         Returns:
             list: 表格列表
         """
-        self._ensure_valid_token()
+        self._ensure_token()
 
         url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables"
 
         headers = {
-            "Authorization": f"Bearer {self.user_access_token}",
+            "Authorization": f"Bearer {self.tenant_access_token}",
             "Content-Type": "application/json"
         }
 
@@ -306,6 +205,8 @@ class FeishuUserClient:
         else:
             raise Exception(f"请求失败: {response.status_code}")
 
+    # ==================== 字段操作 ====================
+
     def get_table_fields(self, app_token, table_id):
         """获取表格字段信息
 
@@ -316,12 +217,12 @@ class FeishuUserClient:
         Returns:
             list: 字段列表
         """
-        self._ensure_valid_token()
+        self._ensure_token()
 
         url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/fields"
 
         headers = {
-            "Authorization": f"Bearer {self.user_access_token}",
+            "Authorization": f"Bearer {self.tenant_access_token}",
             "Content-Type": "application/json"
         }
 
@@ -337,59 +238,43 @@ class FeishuUserClient:
         else:
             raise Exception(f"请求失败: {response.status_code}")
 
-    def delete_default_fields(self, app_token, table_id, keep_first=True):
-        """删除表格的默认字段
+    def create_field(self, app_token, table_id, field_name, field_type=1):
+        """创建字段
 
         Args:
             app_token: Base token
             table_id: 表格 ID
-            keep_first: 是否保留第一个字段（主键字段无法删除）
+            field_name: 字段名称
+            field_type: 字段类型 (1=文本, 2=数字, 3=单选, 4=多选, 5=日期, 17=附件)
 
         Returns:
-            int: 删除的字段数量
+            dict: 创建的字段信息
         """
-        self._ensure_valid_token()
+        self._ensure_token()
 
-        fields = self.get_table_fields(app_token, table_id)
-        deleted_count = 0
+        url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/fields"
 
-        # 默认字段名称（飞书新建表格时的默认字段）
-        default_field_names = ["文本", "单选", "日期", "附件"]
+        headers = {
+            "Authorization": f"Bearer {self.tenant_access_token}",
+            "Content-Type": "application/json"
+        }
 
-        for field in fields:
-            if field is None:
-                continue
-            field_name = field.get("field_name", "")
-            field_id = field.get("field_id")
-            property_data = field.get("property")
-            is_primary = property_data.get("primary", False) if property_data else False
+        payload = {
+            "field_name": field_name,
+            "type": field_type
+        }
 
-            # 跳过主键字段
-            if is_primary or (keep_first and deleted_count == 0 and field_name in default_field_names):
-                continue
+        response = requests.post(url, headers=headers, json=payload)
 
-            # 只删除默认字段
-            if field_name in default_field_names:
-                url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/fields/{field_id}"
-
-                headers = {
-                    "Authorization": f"Bearer {self.user_access_token}",
-                    "Content-Type": "application/json"
-                }
-
-                response = requests.delete(url, headers=headers)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("code") == 0:
-                        deleted_count += 1
-                        print(f"✓ 已删除默认字段: {field_name}")
-                    else:
-                        print(f"⚠️  删除字段失败 {field_name}: {data.get('msg')}")
-                else:
-                    print(f"⚠️  删除字段请求失败: {response.status_code}")
-
-        return deleted_count
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                field = data.get("data", {}).get("field")
+                return field
+            else:
+                raise Exception(f"创建字段失败: {data.get('msg')}")
+        else:
+            raise Exception(f"请求失败: {response.status_code}")
 
     def create_fields_from_excel(self, app_token, table_id, excel_path):
         """从 Excel 列名推断并创建字段
@@ -402,117 +287,66 @@ class FeishuUserClient:
         Returns:
             list: 创建的字段列表
         """
-        import pandas as pd
-
         # 读取 Excel 列名
         df = pd.read_excel(excel_path, nrows=0)
         columns = list(df.columns)
 
+        # 获取现有字段
+        existing_fields = self.get_table_fields(app_token, table_id)
+        existing_field_names = {f.get("field_name") for f in existing_fields}
+
         print(f"从 Excel 推断字段: {columns}")
+        print(f"现有字段: {existing_field_names}")
 
         # 推断字段类型
         created_fields = []
         for col in columns:
-            # 根据列名推断类型
-            col_lower = str(col).lower()
+            col_str = str(col)
 
-            if any(keyword in col_lower for keyword in ["链接", "url", "链接", "网址", "http"]):
-                field_type = 1  # 文本（URL 字段在 API 中有限制）
+            # 跳过已存在的字段
+            if col_str in existing_field_names:
+                print(f"⊙ 字段已存在，跳过: {col_str}")
+                continue
+
+            # 根据列名推断类型
+            col_lower = col_str.lower()
+
+            if any(keyword in col_lower for keyword in ["链接", "url", "网址", "http"]):
+                field_type = 1  # 文本
             elif any(keyword in col_lower for keyword in ["序号", "id", "编号"]):
                 field_type = 2  # 数字
             elif any(keyword in col_lower for keyword in ["时间", "日期", "time", "date"]):
                 field_type = 5  # 日期
-            elif any(keyword in col_lower for keyword in ["是", "否", "是否", "true", "false"]):
+            elif any(keyword in col_lower for keyword in ["是", "否", "是否"]):
                 field_type = 3  # 单选
+            elif any(keyword in col_lower for keyword in ["封面", "图片", "附件", "file", "image"]):
+                field_type = 17  # 附件
             else:
                 # 尝试读取一些数据来推断类型
-                sample_df = pd.read_excel(excel_path, usecols=[col])
-                sample_values = sample_df[col].dropna().head(10)
+                try:
+                    sample_df = pd.read_excel(excel_path, usecols=[col])
+                    sample_values = sample_df[col].dropna().head(10)
 
-                if sample_values.empty:
+                    if sample_values.empty:
+                        field_type = 1  # 默认文本
+                    elif all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in sample_values):
+                        field_type = 2  # 数字
+                    else:
+                        field_type = 1  # 文本
+                except:
                     field_type = 1  # 默认文本
-                elif all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in sample_values):
-                    field_type = 2  # 数字
-                else:
-                    field_type = 1  # 文本
 
             # 创建字段
-            url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/fields"
-
-            headers = {
-                "Authorization": f"Bearer {self.user_access_token}",
-                "Content-Type": "application/json"
-            }
-
-            payload = {
-                "field_name": str(col),
-                "type": field_type
-            }
-
-            response = requests.post(url, headers=headers, json=payload)
-
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("code") == 0:
-                    created_fields.append(str(col))
-                    print(f"✓ 创建字段: {str(col)} (类型: {field_type})")
-                else:
-                    print(f"⚠️  创建字段失败 {str(col)}: {data.get('msg')}")
-            else:
-                print(f"⚠️  创建字段请求失败: {response.status_code}")
+            try:
+                field = self.create_field(app_token, table_id, col_str, field_type)
+                created_fields.append(col_str)
+                print(f"✓ 创建字段: {col_str} (类型: {field_type})")
+            except Exception as e:
+                print(f"⚠️  创建字段失败 {col_str}: {e}")
 
         return created_fields
 
-    def list_table_rows(self, app_token, table_id, page_size=100):
-        """获取表格数据
-
-        Args:
-            app_token: Base token
-            table_id: 表格 ID
-            page_size: 每页数据量
-
-        Returns:
-            list: 表格数据列表
-        """
-        self._ensure_valid_token()
-
-        all_rows = []
-        page_token = None
-
-        while True:
-            url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/records"
-
-            headers = {
-                "Authorization": f"Bearer {self.user_access_token}",
-                "Content-Type": "application/json"
-            }
-
-            params = {
-                "page_size": page_size
-            }
-            if page_token:
-                params["page_token"] = page_token
-
-            response = requests.get(url, headers=headers, params=params)
-
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("code") == 0:
-                    items = data.get("data", {}).get("items", [])
-                    all_rows.extend(items)
-
-                    # 检查是否还有更多数据
-                    has_more = data.get("data", {}).get("has_more", False)
-                    if has_more:
-                        page_token = data.get("data", {}).get("page_token")
-                    else:
-                        break
-                else:
-                    raise Exception(f"查询失败: {data.get('code')} - {data.get('msg')}")
-            else:
-                raise Exception(f"请求失败: {response.status_code}")
-
-        return all_rows
+    # ==================== 数据操作 ====================
 
     def batch_create_records(self, app_token, table_id, records, batch_size=50):
         """批量创建记录
@@ -526,7 +360,7 @@ class FeishuUserClient:
         Returns:
             int: 成功创建的记录数
         """
-        self._ensure_valid_token()
+        self._ensure_token()
 
         total = len(records)
         created = 0
@@ -541,7 +375,7 @@ class FeishuUserClient:
             url = f"{self.base_url}/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_create"
 
             headers = {
-                "Authorization": f"Bearer {self.user_access_token}",
+                "Authorization": f"Bearer {self.tenant_access_token}",
                 "Content-Type": "application/json"
             }
 
@@ -569,7 +403,7 @@ class FeishuUserClient:
 
         print(f"\n导入完成: {created} 条成功, {failed} 条失败")
 
-        # 发送飞书消息通知（使用机器人身份）
+        # 发送飞书消息通知
         try:
             completion_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             message = f"""✅ 飞书数据导入完成
@@ -583,57 +417,12 @@ Base 链接：
 https://zenoasislab.feishu.cn/base/{app_token}"""
 
             if created > 0:
-                notifier = FeishuBotNotifier(self.app_id, self.app_secret, self.user_open_id)
-                if notifier.send_notification(message):
+                if self.notifier.send_notification(message):
                     print("✓ 已发送飞书消息通知")
         except Exception as e:
             print(f"⚠️  发送飞书消息失败: {e}")
 
         return created
-
-    def send_message(self, receive_id, content, msg_type="text", receive_id_type="open_id"):
-        """发送消息到用户或群组
-
-        Args:
-            receive_id: 接收者 ID
-            content: 消息内容
-            msg_type: 消息类型（text, post, interactive）
-            receive_id_type: 接收者 ID 类型（open_id, user_id, union_id, chat_id）
-
-        Returns:
-            dict: 消息信息
-        """
-        self._ensure_valid_token()
-
-        # receive_id_type 是 URL 参数
-        url = f"{self.base_url}/im/v1/messages?receive_id_type={receive_id_type}"
-
-        headers = {
-            "Authorization": f"Bearer {self.user_access_token}",
-            "Content-Type": "application/json"
-        }
-
-        if msg_type == "text":
-            payload_content = json.dumps({"text": content})
-        else:
-            payload_content = content
-
-        payload = {
-            "receive_id": receive_id,
-            "msg_type": msg_type,
-            "content": payload_content
-        }
-
-        response = requests.post(url, headers=headers, json=payload)
-
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("code") == 0:
-                return data.get("data")
-            else:
-                raise Exception(f"发送消息失败: {data.get('msg')}")
-        else:
-            raise Exception(f"请求失败: {response.status_code}")
 
     def import_excel_to_feishu(self, app_token, table_id, excel_path):
         """从 Excel 导入数据到飞书
@@ -656,19 +445,14 @@ https://zenoasislab.feishu.cn/base/{app_token}"""
         # 转换为飞书格式
         records = []
         for _, row in df.iterrows():
-            # 处理 NaN 值
             record = {}
             for col, val in row.items():
                 if pd.notna(val):
                     # 处理特殊类型
-                    if hasattr(pd, 'datetime64') and isinstance(val, (pd.Timestamp, pd.datetime64)):
-                        record[str(col)] = val.strftime('%Y-%m-%d %H:%M:%S')
-                    elif isinstance(val, pd.Timestamp):
+                    if isinstance(val, pd.Timestamp):
                         record[str(col)] = val.strftime('%Y-%m-%d %H:%M:%S')
                     elif isinstance(val, (int, float)):
-                        # 检查是否为 NaN
-                        if not pd.isna(val):
-                            record[str(col)] = float(val) if isinstance(val, float) else int(val)
+                        record[str(col)] = float(val) if isinstance(val, float) and not val.is_integer() else int(val) if isinstance(val, (int, float)) else str(val)
                     else:
                         record[str(col)] = str(val)
 
@@ -679,6 +463,43 @@ https://zenoasislab.feishu.cn/base/{app_token}"""
 
         # 批量导入
         return self.batch_create_records(app_token, table_id, records)
+
+    # ==================== 目标表格操作 ====================
+
+    def import_to_target_table(self, excel_path, create_fields=True):
+        """直接导入到配置的目标表格
+
+        Args:
+            excel_path: Excel 文件路径
+            create_fields: 是否自动创建字段
+
+        Returns:
+            int: 导入的记录数
+        """
+        if not self.target_table:
+            raise Exception("未配置 target_table，请在配置文件中设置")
+
+        app_token = self.target_table.get('app_token')
+        table_id = self.target_table.get('table_id')
+        table_name = self.target_table.get('name', '目标表格')
+
+        print(f"📋 导入到目标表格: {table_name}")
+        print(f"   App Token: {app_token}")
+        print(f"   Table ID: {table_id}")
+
+        # 自动创建字段
+        if create_fields:
+            print(f"\n🔧 检查并创建字段...")
+            created_fields = self.create_fields_from_excel(app_token, table_id, excel_path)
+            print(f"✓ 新增 {len(created_fields)} 个字段")
+
+        # 导入数据
+        print(f"\n📊 导入数据...")
+        count = self.import_excel_to_feishu(app_token, table_id, excel_path)
+
+        return count
+
+    # ==================== 一键操作 ====================
 
     def create_and_import(self, base_name, excel_path, clean_defaults=True):
         """一键创建 Base 并导入数据
@@ -710,19 +531,13 @@ https://zenoasislab.feishu.cn/base/{app_token}"""
         table_id = tables[0].get('table_id')
         print(f"✓ 表格 ID: {table_id}")
 
-        # 3. 删除默认字段（如果需要）
-        if clean_defaults:
-            print(f"\n3️⃣  清理默认字段...")
-            deleted = self.delete_default_fields(app_token, table_id)
-            print(f"✓ 已删除 {deleted} 个默认字段")
-
-        # 4. 从 Excel 创建字段
-        print(f"\n4️⃣  创建自定义字段...")
+        # 3. 从 Excel 创建字段
+        print(f"\n3️⃣  创建字段...")
         created_fields = self.create_fields_from_excel(app_token, table_id, excel_path)
         print(f"✓ 已创建 {len(created_fields)} 个字段")
 
-        # 5. 导入数据
-        print(f"\n5️⃣  导入数据...")
+        # 4. 导入数据
+        print(f"\n4️⃣  导入数据...")
         count = self.import_excel_to_feishu(app_token, table_id, excel_path)
 
         print(f"\n✅ 一键创建并导入完成！")
@@ -740,23 +555,35 @@ def main():
     """命令行入口"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="飞书自动化工具 - 用户身份版")
-    parser.add_argument("action", choices=["create-base", "import-data", "notify", "create-and-import"],
+    parser = argparse.ArgumentParser(description="飞书自动化工具 v3.0 - tenant_access_token 版本")
+    parser.add_argument("action", choices=["create-base", "import-data", "import-to-target", "create-and-import", "test"],
                         help="操作类型")
     parser.add_argument("--name", help="Base 名称")
     parser.add_argument("--app-token", help="Base token")
     parser.add_argument("--table-id", help="表格 ID")
     parser.add_argument("--excel", help="Excel 文件路径")
-    parser.add_argument("--message", help="消息内容")
-    parser.add_argument("--keep-defaults", action="store_true",
-                        help="保留默认字段（不删除）")
+    parser.add_argument("--no-create-fields", action="store_true",
+                        help="不自动创建字段")
 
     args = parser.parse_args()
 
     try:
-        client = FeishuUserClient()
+        client = FeishuTenantClient()
 
-        if args.action == "create-base":
+        if args.action == "test":
+            print("=" * 60)
+            print("飞书配置测试")
+            print("=" * 60)
+            print(f"✓ 配置文件加载成功")
+            print(f"  App ID: {client.app_id}")
+            print(f"  User Open ID: {client.user_open_id}")
+            print(f"  Chat ID: {client.chat_id}")
+            print(f"  Folder Token: {client.folder_token or '未设置'}")
+            print(f"  目标表格: {client.target_table.get('name', '未设置')}")
+            print(f"\n✓ Tenant Token 获取成功: {client.tenant_access_token[:20]}...")
+            print("=" * 60)
+
+        elif args.action == "create-base":
             if not args.name:
                 print("错误: 请提供 --name 参数")
                 return
@@ -764,7 +591,7 @@ def main():
             result = client.create_base(args.name)
             print(f"\n✅ Base 创建成功！")
             print(f"链接: https://zenoasislab.feishu.cn/base/{result.get('app_token')}")
-            print(f"所有者: {client.user_open_id}（你）")
+            print(f"所有者: 应用（使用 tenant_access_token）")
 
         elif args.action == "import-data":
             if not args.app_token or not args.table_id or not args.excel:
@@ -778,29 +605,27 @@ def main():
             )
             print(f"\n✅ 数据导入完成！共导入 {count} 条记录")
 
+        elif args.action == "import-to-target":
+            if not args.excel:
+                print("错误: 请提供 --excel 参数")
+                return
+
+            count = client.import_to_target_table(
+                args.excel,
+                create_fields=not args.no_create_fields
+            )
+            print(f"\n✅ 导入到目标表格完成！共导入 {count} 条记录")
+
         elif args.action == "create-and-import":
             if not args.name or not args.excel:
                 print("错误: 请提供 --name 和 --excel 参数")
                 return
 
-            result = client.create_and_import(
-                args.name,
-                args.excel,
-                clean_defaults=not args.keep_defaults
-            )
+            result = client.create_and_import(args.name, args.excel)
             print(f"\n✅ 一键完成！")
             print(f"   Base: {args.name}")
             print(f"   链接: https://zenoasislab.feishu.cn/base/{result['app_token']}")
             print(f"   记录: {result['count']} 条")
-
-        elif args.action == "notify":
-            if not args.message:
-                print("错误: 请提供 --message 参数")
-                return
-
-            # 发送给自己
-            client.send_message(client.user_open_id, args.message)
-            print(f"\n✅ 通知发送成功！")
 
     except Exception as e:
         print(f"\n❌ 错误: {e}")

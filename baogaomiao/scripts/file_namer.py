@@ -43,35 +43,54 @@ class PDFRenamer:
         """
         self.default_year = default_year
 
-    def generate_filename(self, chinese_title: str, pdf_path: Optional[Path] = None) -> str:
+    def generate_filename(self, chinese_title: str, org_name: str = "", pdf_path: Optional[Path] = None) -> str:
         """
         根据中文标题生成标准化文件名
 
-        命名格式：MMDD-Year+报告名称.pdf
-        - MMDD: 当前日期（月日）
-        - Year: 年份（从标题提取，默认2026）
-        - 报告名称: 12个中文字以内
+        命名格式：[机构]报告名称.pdf
+        - 机构：研究机构名称（如有）
+        - 报告名称：12个中文字以内（移除emoji和年份）
 
         Args:
             chinese_title: 中文标题（如：🎯2026 母婴连锁经营数据报告 —— 逆势增长密码）
+            org_name: 研究机构名称（如：国金证券股份有限公司）
             pdf_path: 原 PDF 文件路径（可选，用于保留扩展名）
 
         Returns:
-            新文件名（如：0227-2026母婴连锁经营数据报告.pdf）
+            新文件名（如：[国金证券]家电材料基石稳固.pdf）
         """
-        # 1. 提取日期：当前日期 MMDD
-        date_str = datetime.now().strftime("%m%d")
-
-        # 2. 提取年份
-        year = self._extract_year(chinese_title) or self.default_year
-
-        # 3. 提取报告名称
+        # 提取报告名称
         name = self._extract_report_name(chinese_title)
 
-        # 4. 组合文件名
-        new_name = f"{date_str}-{year}{name}.pdf"
+        # 组合文件名：[机构]报告名称.pdf
+        if org_name:
+            # 简化机构名称（移除"股份有限公司"、"证券"等后缀）
+            short_org = self._shorten_org_name(org_name)
+            new_name = f"[{short_org}]{name}.pdf"
+        else:
+            new_name = f"{name}.pdf"
 
         return new_name
+
+    def _shorten_org_name(self, org_name: str) -> str:
+        """
+        简化机构名称
+
+        例如：
+        - "国金证券股份有限公司" -> "国金证券"
+        - "开源证券股份有限公司" -> "开源证券"
+        - "中信证券股份有限公司" -> "中信证券"
+        """
+        # 常见后缀
+        suffixes = ['股份有限公司', '有限公司', '有限责任公司', '证券', '证券股份有限公司']
+
+        # 移除后缀
+        for suffix in suffixes:
+            if org_name.endswith(suffix):
+                org_name = org_name[:-len(suffix)].strip()
+                break
+
+        return org_name
 
     def _extract_year(self, title: str) -> Optional[str]:
         """从标题中提取年份"""

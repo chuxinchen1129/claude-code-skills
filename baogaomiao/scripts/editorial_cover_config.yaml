@@ -9,6 +9,11 @@ defaults:
   # 默认的封面输出目录
   default_output_dir: ~/Desktop/DMS/skills/baogaomiao/scripts/covers
 
+  # 中文标题限制 ⭐ UPDATED (v2.9.2)
+  max_chinese_title_length: 20  # 中文标题总长度最多20字（不含年份前缀）
+  max_chinese_lines: 2  # 中文标题最多2行（年份占1行，总共3行）
+  max_chinese_chars_per_line: 10  # 中文标题每行最多10字
+
   # 页码字号（倍数）
   page_num_font_scale: 2.0  # 2x = text-[6.7rem]
 

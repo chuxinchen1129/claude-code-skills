@@ -1,9 +1,9 @@
 ---
 name: universal-crawler
-description: 通用网页爬虫 - 使用 web_reader MCP 工具爬取任意网页内容，支持 Google 搜索、自定义 URL、批量处理。输出 Markdown 格式。当用户提到"爬虫"、"网页抓取"、"Google 搜索"、"提取网页内容"、"批量爬取"时使用。
+description: 通用网页爬虫 - 使用 web_reader MCP 工具爬取任意网页内容，支持 Google 搜索、自定义 URL、批量处理。输出 Markdown 格式。使用场景：在XX网站调研、爬取XX网页、抓取网页内容、Google 搜索。当用户提到"在XX调研"、"爬虫"、"网页抓取"、"Google 搜索"、"提取网页内容"、"批量爬取"时使用。
 version: 1.0.0
 created: 2026-02-11
-updated: 2026-02-11
+updated: 2026-03-01
 ---
 
 # Universal Crawler Skill v1.0

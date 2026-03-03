@@ -18,8 +18,58 @@ from typing import Optional, Dict
 class EditorialCoverGenerator:
     """现代社论风HTML封面生成器"""
 
+    # 品牌中立化关键词映射（使用短语而非单词，避免误替换）
+    BRAND_NEUTRALIZE_PATTERNS = [
+        # 品牌/公司相关 - 使用完整短语
+        ("龙头地位", "市场地位"),
+        ("行业龙头", "行业深度"),
+        ("绝对龙头", "市场深度"),
+        ("龙头", "核心"),  # 最后才匹配单字
+        # 业绩相关
+        ("增长密码", "增长动因"),
+        ("成功密码", "成功因素"),
+        ("逆势增长", "业绩增长"),
+        ("增长背后", "增长分析"),
+        # 情感词
+        ("璀璨", "核心"),
+        ("闪耀", "核心"),
+        ("辉煌", "重要"),
+        ("传奇", "发展"),
+        ("神话", "历程"),
+    ]
+
+    # 常见词汇（用于避免在词中间断开）
+    COMMON_WORDS = set([
+        "报告", "研究", "分析", "白皮书", "洞察", "深度", "行业", "市场", "趋势",
+        "数据", "经营", "发展", "战略", "布局", "领域", "赛道", "技术", "创新",
+        "产品", "品牌", "公司", "业务", "收入", "利润", "增长", "规模", "份额",
+        "电池", "芯片", "半导体", "机器人", "化妆品", "母婴", "零售", "连锁",
+        "一次性", "碱性", "锂离子", "硅光", "光芯片", "薄膜", "铌酸锂",
+        "品类", "品类创新", "市场", "市场地位", "地位", "稳固", "探索", "第二", "第二曲线", "曲线",
+    ])
+    CATEGORY_KEYWORDS = {
+        "一次性电池": ["南孚", "碱性电池", "碱锰电池", "碳性电池", "锌锰电池", "一次性电池", "干电池"],
+        "锂离子电池": ["锂电池", "锂离子", "动力电池", "储能电池", "三元锂", "磷酸铁锂"],
+        "半导体": ["芯片", "半导体", "集成电路", "IC", "GPU", "CPU", "光芯片", "硅光"],
+        "机器人": ["机器人", "自动化", "智能制造", "工控", "机器臂"],
+        "化妆品": ["化妆品", "护肤", "彩妆", "珀莱雅", "贝泰尼", "上海家化"],
+        "母婴": ["母婴", "童装", "奶粉", "纸尿裤", "玩具", "宝宝"],
+        "连锁零售": ["连锁", "零售", "超市", "便利店", "门店"],
+        "AI/人工智能": ["AI", "人工智能", "大模型", "ChatGPT", "深度学习"],
+        "光通信": ["光通信", "光纤", "光模块", "CPO", "薄膜铌酸锂"],
+        "消费电子": ["消费电子", "手机", "耳机", "智能手表", "AR", "VR"],
+        "新能源": ["新能源", "光伏", "风电", "储能", "充电桩"],
+        "汽车": ["汽车", "整车", "乘用车", "新能源汽车", "电动车"],
+        "医疗器械": ["医疗器械", "医疗设备", "影像", "诊断"],
+        "医药": ["医药", "药品", "生物药", "创新药", "仿制药"],
+        "食品饮料": ["食品", "饮料", "白酒", "乳制品", "调味品"],
+        "家电": ["家电", "空调", "冰箱", "洗衣机", "小家电"],
+    }
+
     # 长度限制常量
-    MAX_CHINESE_CHARS_PER_LINE = 8  # 中文标题每行最多8字
+    MAX_CHINESE_TITLE_LENGTH = 20  # 中文标题总长度最多20字（不含年份前缀）
+    MAX_CHINESE_LINES = 2  # 中文标题最多2行（年份占1行，总共3行）
+    MAX_CHINESE_CHARS_PER_LINE = 10  # 中文标题每行最多10字
     MAX_ENGLISH_LENGTH = 25  # 英文标题最多25个字符
     MAX_HIGHLIGHT_TITLE_LENGTH = 60  # 摘要标题最多60字（3句话完整显示）
     MAX_SUMMARY_TEXT_LENGTH = 80  # 摘要内容最多80字
@@ -115,9 +165,9 @@ class EditorialCoverGenerator:
                         <p class="text-xs text-textMain/80">{report_type}</p>
                     </div>
                     <div class="bg-white/80 backdrop-blur-sm p-4 rounded-lg shadow-sm">
-                        <i class="fa fa-calendar text-xl text-accent mb-2"></i>
-                        <h3 class="font-bold text-base mb-1 text-textMain">发布年份</h3>
-                        <p class="text-xs text-textMain/80">{year}</p>
+                        <i class="fa fa-tag text-xl text-accent mb-2"></i>
+                        <h3 class="font-bold text-base mb-1 text-textMain">核心品类</h3>
+                        <p class="text-xs text-textMain/80">{category}</p>
                     </div>
                     <div class="bg-white/80 backdrop-blur-sm p-4 rounded-lg shadow-sm">
                         <i class="fa fa-barcode text-xl text-accent mb-2"></i>
@@ -182,7 +232,9 @@ class EditorialCoverGenerator:
 
         # 默认配置
         default_config = {
-            'max_chinese_chars_per_line': 8,
+            'max_chinese_title_length': 25,  # 中文标题总长度最多25字（不含年份前缀）
+            'max_chinese_lines': 3,  # 中文标题最多3行
+            'max_chinese_chars_per_line': 9,  # 中文标题每行最多9字（3行共25字）
             'max_english_length': 25,
             'max_highlight_title_length': 60,
             'max_summary_text_length': 80,
@@ -204,6 +256,12 @@ class EditorialCoverGenerator:
                     defaults = user_config['defaults']
 
                     # 更新长度限制
+                    if 'max_chinese_title_length' in defaults:
+                        default_config['max_chinese_title_length'] = defaults['max_chinese_title_length']
+                    if 'max_chinese_lines' in defaults:
+                        default_config['max_chinese_lines'] = defaults['max_chinese_lines']
+                    if 'max_chinese_chars_per_line' in defaults:
+                        default_config['max_chinese_chars_per_line'] = defaults['max_chinese_chars_per_line']
                     if 'highlight_title_max_length' in defaults:
                         default_config['max_highlight_title_length'] = defaults['highlight_title_max_length']
                     if 'summary_max_length' in defaults:
@@ -237,6 +295,8 @@ class EditorialCoverGenerator:
         config = self._load_config()
 
         # 应用配置到类常量（确保类型正确）
+        self.MAX_CHINESE_TITLE_LENGTH = int(config['max_chinese_title_length'])
+        self.MAX_CHINESE_LINES = int(config['max_chinese_lines'])
         self.MAX_CHINESE_CHARS_PER_LINE = int(config['max_chinese_chars_per_line'])
         self.MAX_ENGLISH_LENGTH = int(config['max_english_length'])
         self.MAX_HIGHLIGHT_TITLE_LENGTH = int(config['max_highlight_title_length'])
@@ -263,6 +323,7 @@ class EditorialCoverGenerator:
         highlight_title: str = "",
         summary_text: str = "",
         report_type: str = "行业研究报告",
+        category: str = "",
         number: Optional[str] = None,
         output_filename: Optional[str] = None
     ) -> Dict:
@@ -278,6 +339,7 @@ class EditorialCoverGenerator:
             highlight_title: 摘要区标题
             summary_text: 摘要区内容
             report_type: 报告类型
+            category: 核心品类（如：一次性电池、半导体等）
             number: 编号（MMDD格式）
             output_filename: 输出文件名
 
@@ -293,37 +355,84 @@ class EditorialCoverGenerator:
             date_full = now.strftime("%Y.%m.%d")
             day = now.strftime("%d")
 
-            # 处理标题换行（优先使用\n，否则按8字一行切分）
-            # 检测真正的\n或转义后的\\n
-            if '\n' in chinese_title or '\\n' in chinese_title:
-                # 用户指定了换行位置，使用<br>实现真正的HTML换行
-                title_lines_html = chinese_title.replace('\n', '<br>').replace('\\n', '<br>')
+            # 处理中文标题：保留年份，去掉emoji，品牌中立化，语义断行
+            # 提取年份前缀（如 2026）
+            year_prefix = ""
+            title_content = chinese_title
+
+            # 匹配年份（带或不带emoji）
+            year_match = re.search(r'[🎯🍼📊🚀💡✨🔥💪⭐]?(\d{4})', chinese_title)
+            if year_match:
+                year_prefix = year_match.group(1)  # 只要年份，不要emoji
+                title_content = chinese_title[year_match.end():]  # 剩余部分
+
+            # 品牌中立化处理
+            title_content = self._neutralize_brand(title_content)
+
+            # 清理剩余内容：移除emoji和其他符号
+            for emoji in ["🎯", "🍼", "📊", "🚀", "💡", "✨", "🔥", "💪", "⭐", "——", "—", " "]:
+                title_content = title_content.replace(emoji, "")
+
+            # 截断到最多25字
+            if len(title_content) > self.MAX_CHINESE_TITLE_LENGTH:
+                title_content = title_content[:self.MAX_CHINESE_TITLE_LENGTH]
+
+            # 使用智能语义断行（避免在词中间断开）
+            if '\n' in title_content or '\\n' in title_content:
+                # 用户指定了换行位置
+                content_lines_html = title_content.replace('\n', '<br>').replace('\\n', '<br>')
             else:
-                # 按字符数自动切分（8字一行）
-                title_clean = chinese_title
-                # 移除emoji
-                for emoji in ["🎯", "🍼", "📊", "🚀", "💡", "✨", "🔥", "💪", "⭐"]:
-                    title_clean = title_clean.replace(emoji, "")
-                title_chars = list(title_clean)
-                title_lines = []
-                for i in range(0, len(title_chars), self.MAX_CHINESE_CHARS_PER_LINE):
-                    title_lines.append("".join(title_chars[i:i+self.MAX_CHINESE_CHARS_PER_LINE]))
-                title_lines_html = "<br>".join(title_lines) if len(title_lines) > 1 else chinese_title
+                # 使用语义断行（智能断词）
+                content_lines = self._split_title_by_semantics(title_content)
+                content_lines_html = "<br>".join(content_lines) if len(content_lines) > 1 else title_content
+
+            # 组合年份 + 内容（年份不带emoji）
+            if year_prefix:
+                title_lines_html = f"{year_prefix}<br>{content_lines_html}"
+            else:
+                title_lines_html = content_lines_html
 
             # 英文标题大写 + 长度限制
             english_upper = english_title.upper()
             if len(english_upper) > self.MAX_ENGLISH_LENGTH:
                 english_upper = english_upper[:self.MAX_ENGLISH_LENGTH] + "..."
 
-            # 摘要区和关键词长度限制
-            if not highlight_title:
-                highlight_title = "核心要点"
-            if len(highlight_title) > self.MAX_HIGHLIGHT_TITLE_LENGTH:
-                highlight_title = highlight_title[:self.MAX_HIGHLIGHT_TITLE_LENGTH]
-            if not summary_text:
-                summary_text = f"本报告深入分析{chinese_title[:10]}等关键议题，"
+            # 报告摘要：将梗概和关键词组合成1-2句完整的话
+            if not highlight_title and not summary_text:
+                # 没有提供任何内容，使用默认值
+                summary_text = f"本报告深入分析{chinese_title[:10]}等关键议题。"
+            elif highlight_title and summary_text:
+                # 有梗概和关键词，组合成1-2句完整的话
+                # 格式：梗概。关键词包括A、B、C等。
+                if summary_text.endswith('、'):
+                    summary_text = summary_text[:-1] + '等'
+                summary_text = f"{highlight_title}。{summary_text}。"
+                # 确保是完整的句子
+                if not summary_text.endswith('。'):
+                    summary_text += '。'
+            elif highlight_title:
+                # 只有梗概，直接使用
+                summary_text = highlight_title
+                if not summary_text.endswith('。'):
+                    summary_text += '。'
+            else:
+                # 只有关键词，生成句子
+                summary_text = f"本报告重点分析{summary_text}等内容。"
+
+            # 摘要长度限制（保留完整句子）
             if len(summary_text) > self.MAX_SUMMARY_TEXT_LENGTH:
-                summary_text = summary_text[:self.MAX_SUMMARY_TEXT_LENGTH]
+                # 截断到最后一个句号
+                last_period = summary_text[:self.MAX_SUMMARY_TEXT_LENGTH].rfind('。')
+                if last_period > 0:
+                    summary_text = summary_text[:last_period + 1]
+                else:
+                    summary_text = summary_text[:self.MAX_SUMMARY_TEXT_LENGTH] + '...'
+
+            # 自动提取核心品类（如果没有提供）
+            if not category:
+                # 从标题、摘要、关键词中提取
+                extract_text = f"{chinese_title} {highlight_title} {summary_text}"
+                category = self._extract_category(extract_text)
 
             # 计算动态值
             page_num_font_size = f"{3.35 * self.page_num_font_scale:.2f}"
@@ -342,7 +451,7 @@ class EditorialCoverGenerator:
                 highlight_title=highlight_title,
                 summary_text=summary_text,
                 report_type=report_type,
-                year=year,
+                category=category,
                 number=number,
                 source=source,
                 date_full=date_full,
@@ -386,6 +495,200 @@ class EditorialCoverGenerator:
         text = emoji_pattern.sub('', text)
         return text.replace(' ', '_')[:30]
 
+    def _neutralize_brand(self, text: str) -> str:
+        """品牌中立化：把带有赞赏色彩的词替换为中性词
+
+        Args:
+            text: 原始文本
+
+        Returns:
+            中立化后的文本
+        """
+        result = text
+        # 按顺序替换（先匹配长的短语，避免误替换）
+        for biased, neutral in self.BRAND_NEUTRALIZE_PATTERNS:
+            result = result.replace(biased, neutral)
+        return result
+
+    def _split_title_by_semantics(self, text: str) -> list:
+        """按语义断句，避免在词中间断开
+
+        Args:
+            text: 标题文本
+
+        Returns:
+            断句后的行列表
+        """
+        if not text:
+            return []
+
+        # 优先按标点符号断句
+        if '——' in text:
+            parts = text.split('——')
+        elif '——' in text:
+            parts = text.split('——')
+        elif '，' in text:
+            parts = text.split('，')
+        elif ' ' in text:
+            parts = text.split(' ')
+        else:
+            parts = [text]
+
+        # 清理每部分
+        lines = [p.strip() for p in parts if p.strip()]
+
+        # 如果只有一行且过长，使用智能断词
+        if len(lines) == 1 and len(lines[0]) > self.MAX_CHINESE_CHARS_PER_LINE:
+            long_text = lines[0]
+            lines = []
+            start = 0
+
+            while start < len(long_text) and len(lines) < self.MAX_CHINESE_LINES:
+                # 计算这行应该到哪里结束
+                preferred_end = start + self.MAX_CHINESE_CHARS_PER_LINE
+                end = min(preferred_end, len(long_text))
+
+                # 如果还没到结尾且没有到字符串末尾，尝试在词边界断开
+                if end < len(long_text):
+                    # 优先尝试在常用词结尾断开
+                    best_break = end
+                    for offset in range(12):  # 向前查找合适的断点（扩大范围）
+                        check_pos = end - offset
+                        if check_pos <= start + 5:  # 至少保留5个字符
+                            break
+
+                        # 检查当前位置是否是常见词的结尾
+                        # 检查接下来的字符是否构成常见词
+                        found_word_boundary = False
+                        for word_len in range(2, 6):  # 检查2-5字的词
+                            if check_pos + word_len <= len(long_text):
+                                potential_word = long_text[check_pos:check_pos + word_len]
+                                if potential_word in self.COMMON_WORDS:
+                                    # 这是一个词的开始，应该在这里断开
+                                    best_break = check_pos
+                                    found_word_boundary = True
+                                    break
+                        if found_word_boundary:
+                            break
+
+                    # 如果找不到词边界，尝试在标点符号处断开
+                    if best_break == end:
+                        for punctuation in ['，', '。', '、', ';', '；']:
+                            punct_pos = long_text.rfind(punctuation, start, end)
+                            if punct_pos > start:
+                                best_break = punct_pos + 1
+                                break
+
+                    end = best_break
+
+                line = long_text[start:end].strip()
+                if line:
+                    lines.append(line)
+                start = end
+
+        # 最多保留3行
+        return lines[:self.MAX_CHINESE_LINES]
+
+    def _extract_category(self, text: str) -> str:
+        """从文本中提取核心品类
+
+        Args:
+            text: 包含关键词的文本（标题、笔记内容等）
+
+        Returns:
+            核心品类名称
+        """
+        if not text:
+            return "行业研究"
+
+        # 遍历品类关键词，找到匹配的
+        for category, keywords in self.CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in text:
+                    return category
+
+        # 没有匹配到，返回默认值
+        return "行业研究"
+
+    def _extract_title_from_note(self, note_text: str) -> tuple:
+        """从小红书笔记中提取标题
+
+        Args:
+            note_text: 小红书笔记内容
+
+        Returns:
+            (中文标题, 英文标题)
+        """
+        # 提取第一行作为标题
+        lines = note_text.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('🎯'):
+                return line, ""
+
+        # 如果没找到，返回默认标题
+        return "🎯2026行业深度研究报告", "INDUSTRY DEEP DIVE REPORT"
+        """按语义断句，优先在标点符号处断开
+
+        Args:
+            text: 标题文本
+
+        Returns:
+            断句后的行列表
+        """
+        if not text:
+            return []
+
+        # 优先按标点符号断句：——、——、，、。、；、：
+        # 首先尝试长破折号
+        if '——' in text:
+            parts = text.split('——')
+        elif '——' in text:
+            parts = text.split('——')
+        elif '，' in text:
+            parts = text.split('，')
+        elif ' ' in text:
+            parts = text.split(' ')
+        else:
+            # 没有标点，按字数切分
+            parts = [text]
+
+        # 清理每部分，并过滤空字符串
+        lines = [p.strip() for p in parts if p.strip()]
+
+        # 如果只有一行且过长，强制按字数切分
+        if len(lines) == 1 and len(lines[0]) > self.MAX_CHINESE_CHARS_PER_LINE:
+            long_text = lines[0]
+            lines = []
+            for i in range(0, len(long_text), self.MAX_CHINESE_CHARS_PER_LINE):
+                line = long_text[i:i+self.MAX_CHINESE_CHARS_PER_LINE]
+                if line:
+                    lines.append(line)
+
+        # 最多保留3行
+        return lines[:self.MAX_CHINESE_LINES]
+
+    def _extract_category(self, text: str) -> str:
+        """从文本中提取核心品类
+
+        Args:
+            text: 包含关键词的文本（标题、笔记内容等）
+
+        Returns:
+            核心品类名称
+        """
+        if not text:
+            return "行业研究"
+
+        # 遍历品类关键词，找到匹配的
+        for category, keywords in self.CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in text:
+                    return category
+
+        # 没有匹配到，返回默认值
+        return "行业研究"
+
 
 def main():
     import argparse
@@ -399,6 +702,7 @@ def main():
     parser.add_argument('--highlight-title', help='摘要区标题', default='')
     parser.add_argument('--summary-text', help='摘要区内容', default='')
     parser.add_argument('--report-type', help='报告类型', default='行业研究报告')
+    parser.add_argument('--category', help='核心品类（如：一次性电池、半导体等）', default='')
     parser.add_argument('--number', help='编号（MMDD格式）')
     parser.add_argument('--output', help='输出文件名')
 
@@ -414,6 +718,7 @@ def main():
         highlight_title=args.highlight_title,
         summary_text=args.summary_text,
         report_type=args.report_type,
+        category=args.category,
         number=args.number,
         output_filename=args.output
     )

@@ -36,12 +36,14 @@ version: 1.0.0
 
 ## 使用流程
 
-### 步骤 1: 安装依赖
+### 步骤 1: 安装依赖（只需一次）
 
 ```bash
 pip install playwright
 playwright install chromium
 ```
+
+**注意**：浏览器只需安装一次，后续直接使用即可，无需重复安装。
 
 ### 步骤 2: 编写脚本
 
@@ -199,6 +201,15 @@ except Exception as e:
 - 使用 Chromium 浏览器（默认安装）
 - 支持自定义 User-Agent
 - 支持代理设置
+
+## 常用账号信息
+
+### Tavily 搜索 API
+```
+邮箱: chenchuxin1129@gmail.com
+密码: Myphone25
+网站: https://tavily.com
+```
 
 ## 参考资源
 
