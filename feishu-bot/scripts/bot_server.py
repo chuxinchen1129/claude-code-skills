@@ -66,9 +66,29 @@ def load_config():
 
 config = load_config()
 
+# 加载东方财富配置
+_eastmoney_config_path = Path.home() / '.feishu_user_config.json'
+eastmoney_config = {}
+if _eastmoney_config_path.exists():
+    with open(_eastmoney_config_path, 'r') as f:
+        eastmoney_config = json.load(f)
+else:
+    logger.warning("[Eastmoney] ~/.feishu_user_config.json not found, eastmoney selection will not work")
+
 # 创建数据目录
 Path(config['data']['collection_dir']).mkdir(parents=True, exist_ok=True)
 Path(config['data']['log_dir']).mkdir(parents=True, exist_ok=True)
+
+# ============================================
+# 东方财富研报选择存储
+# ============================================
+eastmoney_selection = {
+    'status': 'idle',  # idle, waiting, ready, timeout, cancelled
+    'total_count': 0,
+    'infocodes': [],
+    'selection': None,
+    'timestamp': None
+}
 
 # 初始化内容路由器、材料组织器和MediaCrawler导入器
 content_router = ContentRouter(config.get('material_base'))
@@ -107,12 +127,13 @@ class FeishuAPI:
         else:
             logger.error(f"请求失败: {response.status_code}")
 
-    def send_message(self, open_id, text):
+    def send_message(self, open_id, text, receive_id_type="open_id"):
         """发送文本消息到飞书
 
         Args:
-            open_id: 用户 open_id
+            open_id: 用户 open_id 或 chat_id
             text: 消息内容
+            receive_id_type: 接收者类型 (open_id 或 chat_id)
 
         Returns:
             bool: 是否发送成功
@@ -120,7 +141,7 @@ class FeishuAPI:
         if not self.app_access_token:
             self._get_app_token()
 
-        url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+        url = f"{self.base_url}/im/v1/messages?receive_id_type={receive_id_type}"
         headers = {
             "Authorization": f"Bearer {self.app_access_token}",
             "Content-Type": "application/json"
@@ -136,7 +157,7 @@ class FeishuAPI:
             if response.status_code == 200:
                 data = response.json()
                 if data.get("code") == 0:
-                    logger.info(f"✓ 消息已发送到 {open_id}")
+                    logger.info(f"✓ 消息已发送到 {open_id} (type={receive_id_type})")
                     return True
                 else:
                     logger.error(f"发送失败 code={data.get('code')}: {data.get('msg')}")
@@ -421,7 +442,8 @@ class MessageHandler:
             'status': self.handle_status,
             'help': self.handle_help,
             'ping': self.handle_ping,
-            'choice': self.handle_eastmoney_choice  # 东方财富爬虫选择
+            'choice': self.handle_eastmoney_choice,  # 东方财富爬虫选择
+            'eastmoney': self.handle_eastmoney_crawl  # 东方财富爬虫触发
         }
 
     def process(self, message_text, user_open_id):
@@ -463,6 +485,10 @@ class MessageHandler:
 
         if message_text in ['查看状态', 'status', '最近采集', '统计']:
             return self.handle_status(user_open_id)
+
+        # 检测东方财富爬虫命令
+        if re.search(r'爬.*东方财富|爬.*研报|eastmoney', message_text, re.IGNORECASE):
+            return self.handle_eastmoney_crawl(message_text, user_open_id)
 
         if message_text in ['help', '帮助', '?']:
             return self.handle_help()
@@ -787,6 +813,108 @@ class MessageHandler:
 
         return msg
 
+    def handle_eastmoney_crawl(self, message_text, user_open_id):
+        """处理东方财富研报爬虫命令
+
+        Args:
+            message_text: 消息文本
+            user_open_id: 飞书用户ID
+
+        Returns:
+            str: 回复文本
+        """
+        logger.info(f"处理东方财富爬虫命令: {message_text}")
+
+        # 解析天数参数
+        days = 3  # 默认3天
+        match = re.search(r'(\d+)\s*[天份]', message_text)
+        if match:
+            days = int(match.group(1))
+
+        # 发送开始消息
+        start_msg = f"""✅ 开始采集东方财富研报
+
+天数：{days}天
+
+正在采集研报信息、下载PDF...
+💡 完成后会发送列表到飞书供你选择
+"""
+        feishu_api.send_message(user_open_id, start_msg)
+
+        # 执行爬虫
+        wrapper_script = Path.home() / "Desktop" / "DMS" / "bin" / "eastmoney_wrapper.py"
+
+        try:
+            result = subprocess.run(
+                ["python3", str(wrapper_script), "crawl", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10分钟超时
+                cwd=Path.home() / "Desktop" / "DMS"
+            )
+
+            if result.returncode == 0:
+                try:
+                    result_data = json.loads(result.stdout)
+                    if result_data.get("status") == "success":
+                        success_msg = f"""✅ 东方财富研报采集完成！
+
+天数：{days}天
+状态：{result_data.get('message', '成功')}
+
+💡 研报列表已发送到飞书，请回复数字选择要保留的研报
+"""
+                        feishu_api.send_message(user_open_id, success_msg)
+                        return success_msg
+                    else:
+                        error_msg = f"""❌ 采集失败
+
+错误：{result_data.get('message', '未知错误')}
+"""
+                        feishu_api.send_message(user_open_id, error_msg)
+                        return error_msg
+                except json.JSONDecodeError:
+                    # 如果不是JSON格式，直接返回输出
+                    success_msg = f"""✅ 东方财富研报采集完成！
+
+天数：{days}天
+
+{result.stdout}
+"""
+                    feishu_api.send_message(user_open_id, success_msg)
+                    return success_msg
+            else:
+                error_msg = f"""❌ 采集失败
+
+退出码：{result.returncode}
+错误：{result.stderr}
+
+💡 建议：
+1. 检查 MediaCrawler 配置
+2. 确认网络连接正常
+3. 查看爬虫日志
+"""
+                feishu_api.send_message(user_open_id, error_msg)
+                return error_msg
+
+        except subprocess.TimeoutExpired:
+            timeout_msg = """❌ 采集超时（10分钟）
+
+💡 建议：
+1. 检查网络连接
+2. 减少采集天数
+3. 稍后重试
+"""
+            feishu_api.send_message(user_open_id, timeout_msg)
+            return timeout_msg
+        except Exception as e:
+            error_msg = f"""❌ 采集异常
+
+错误：{str(e)}
+"""
+            feishu_api.send_message(user_open_id, error_msg)
+            return error_msg
+
     def handle_help(self, user_open_id=None):
         """处理帮助"""
         msg = """🤖 飞书机器人使用指南
@@ -800,6 +928,11 @@ class MessageHandler:
 📌 关键词采集
 采集：关键词 [数量]
 例：采集：睡眠仪 50
+
+📌 东方财富研报爬虫 ⭐ NEW
+爬东方财富研报 [天数]
+例：爬东方财富研报
+例：爬东方财富研报 7
 
 📌 数据导入（MediaCrawler采集结果）
 导入：最新 [导入最近7天采集数据]
@@ -863,6 +996,129 @@ handler = MessageHandler()
 # ============================================
 # Flask 路由
 # ============================================
+@app.route('/api/send-message', methods=['POST'])
+def api_send_message():
+    """接收 MediaCrawler 发送的消息并转发到飞书"""
+    try:
+        data = request.get_json()
+        message = data.get('message', '')
+
+        logger.info(f"收到来自 MediaCrawler 的消息: {message[:100]}")
+
+        if not message:
+            return jsonify({'success': False, 'msg': '缺少 message 参数'})
+
+        # 使用 feishu_bot_notifier.py 脚本发送消息（使用 user_access_token）
+        # 这个脚本可以发送消息到用户 open_id，避免了 app_access_token 的 cross app 限制
+        notifier_script = Path(__file__).parent.parent.parent / "feishu-universal" / "scripts" / "feishu_bot_notifier.py"
+
+        if not notifier_script.exists():
+            logger.error(f"Feishu notifier script not found: {notifier_script}")
+            return jsonify({'success': False, 'msg': '通知脚本不存在'})
+
+        try:
+            result = subprocess.run(
+                ['/opt/homebrew/bin/python3', str(notifier_script), '--message', message],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                logger.info("✓ 消息已通过 feishu_bot_notifier.py 发送到飞书")
+                return jsonify({'success': True, 'msg': '消息已转发'})
+            else:
+                logger.error(f"Feishu notifier failed: {result.stderr}")
+                return jsonify({'success': False, 'msg': '消息转发失败'})
+
+        except Exception as e:
+            logger.error(f"调用 feishu_bot_notifier 失败: {e}")
+            return jsonify({'success': False, 'msg': str(e)})
+
+    except Exception as e:
+        logger.error(f"处理消息失败: {e}", exc_info=True)
+        return jsonify({'success': False, 'msg': str(e)})
+
+# ============================================
+# 东方财富研报选择 API
+# ============================================
+@app.route('/api/eastmoney/save_selection', methods=['POST'])
+def api_eastmoney_save_selection():
+    """保存待选择的研报列表"""
+    global eastmoney_selection
+    try:
+        data = request.get_json()
+        total_count = data.get('total_count', 0)
+        infocodes = data.get('infocodes', [])
+
+        eastmoney_selection = {
+            'status': 'waiting',
+            'total_count': total_count,
+            'infocodes': infocodes,
+            'selection': None,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        logger.info(f"[Eastmoney] Saved selection data: {total_count} reports, waiting for user input")
+        return jsonify({'success': True, 'msg': 'Selection data saved', 'data': eastmoney_selection})
+
+    except Exception as e:
+        logger.error(f"[Eastmoney] Failed to save selection: {e}", exc_info=True)
+        return jsonify({'success': False, 'msg': str(e)}), 500
+
+
+@app.route('/api/eastmoney/get_selection', methods=['GET'])
+def api_eastmoney_get_selection():
+    """获取用户选择"""
+    global eastmoney_selection
+    try:
+        return jsonify({
+            'success': True,
+            'data': eastmoney_selection
+        })
+    except Exception as e:
+        logger.error(f"[Eastmoney] Failed to get selection: {e}", exc_info=True)
+        return jsonify({'success': False, 'msg': str(e)}), 500
+
+
+@app.route('/api/eastmoney/update_selection', methods=['POST'])
+def api_eastmoney_update_selection():
+    """更新用户选择（由 webhook 调用）"""
+    global eastmoney_selection
+    try:
+        data = request.get_json()
+        selection = data.get('selection', [])
+        status = data.get('status', 'ready')
+
+        eastmoney_selection['selection'] = selection
+        eastmoney_selection['status'] = status
+        eastmoney_selection['timestamp'] = datetime.now().isoformat()
+
+        logger.info(f"[Eastmoney] Selection updated: status={status}, selection={selection}")
+        return jsonify({'success': True, 'msg': 'Selection updated'})
+
+    except Exception as e:
+        logger.error(f"[Eastmoney] Failed to update selection: {e}", exc_info=True)
+        return jsonify({'success': False, 'msg': str(e)}), 500
+
+
+@app.route('/api/eastmoney/clear_selection', methods=['DELETE', 'POST'])
+def api_eastmoney_clear_selection():
+    """清除选择数据"""
+    global eastmoney_selection
+    try:
+        eastmoney_selection = {
+            'status': 'idle',
+            'total_count': 0,
+            'infocodes': [],
+            'selection': None,
+            'timestamp': None
+        }
+        logger.info("[Eastmoney] Selection cleared")
+        return jsonify({'success': True, 'msg': 'Selection cleared'})
+    except Exception as e:
+        logger.error(f"[Eastmoney] Failed to clear selection: {e}", exc_info=True)
+        return jsonify({'success': False, 'msg': str(e)}), 500
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -896,9 +1152,80 @@ def webhook():
 
         if msg_type == 'text':
             content = json.loads(message.get('content', '{}'))
-            text = content.get('text', '')
+            text = content.get('text', '').strip()
 
             logger.info(f"用户 {user_open_id} 发送: {text}")
+
+            # 检查是否是东方财富研报选择消息
+            if eastmoney_selection['status'] == 'waiting':
+                import re
+                # 检测数字选择（如 "1,3,5" 或 "1 3 5"）
+                if re.match(r'^[\d\s,，]+$', text):
+                    # 解析数字选择
+                    parts = text.replace('，', ',').split(',')
+                    indices = []
+                    for part in parts:
+                        part = part.strip()
+                        if part.isdigit():
+                            idx = int(part) - 1  # 转换为0索引
+                            if 0 <= idx < eastmoney_selection['total_count']:
+                                indices.append(idx)
+
+                    selected_infocodes = [eastmoney_selection['infocodes'][i] for i in indices]
+
+                    eastmoney_selection['selection'] = selected_infocodes
+                    eastmoney_selection['status'] = 'ready'
+                    eastmoney_selection['timestamp'] = datetime.now().isoformat()
+
+                    logger.info(f"[Eastmoney] User selected {len(selected_infocodes)} reports: {selected_infocodes}")
+
+                    # 发送确认回复
+                    feishu_api.send_message(
+                        receive_id=eastmoney_config.get('chat_id', ''),
+                        content=f"✅ 已收到您的选择，共 {len(selected_infocodes)} 份报告。正在处理...",
+                        msg_type="text"
+                    )
+                    return jsonify({'code': 0, 'msg': 'eastmoney selection recorded'})
+
+                # 检测特殊命令
+                elif text in ['全部保留', 'all', 'All', 'ALL']:
+                    eastmoney_selection['selection'] = eastmoney_selection['infocodes']
+                    eastmoney_selection['status'] = 'ready'
+                    eastmoney_selection['timestamp'] = datetime.now().isoformat()
+                    logger.info(f"[Eastmoney] User selected: keep all ({len(eastmoney_selection['infocodes'])} reports)")
+
+                    feishu_api.send_message(
+                        receive_id=eastmoney_config.get('chat_id', ''),
+                        content=f"✅ 已保留全部 {len(eastmoney_selection['infocodes'])} 份报告。正在处理...",
+                        msg_type="text"
+                    )
+                    return jsonify({'code': 0, 'msg': 'eastmoney keep all'})
+
+                elif text in ['全部删除', 'delete all', 'Delete All', 'DELETE ALL']:
+                    eastmoney_selection['selection'] = []
+                    eastmoney_selection['status'] = 'ready'
+                    eastmoney_selection['timestamp'] = datetime.now().isoformat()
+                    logger.info("[Eastmoney] User selected: delete all")
+
+                    feishu_api.send_message(
+                        receive_id=eastmoney_config.get('chat_id', ''),
+                        content="✅ 已删除全部报告。",
+                        msg_type="text"
+                    )
+                    return jsonify({'code': 0, 'msg': 'eastmoney delete all'})
+
+                elif text in ['取消', 'cancel', 'Cancel', 'CANCEL']:
+                    eastmoney_selection['selection'] = None
+                    eastmoney_selection['status'] = 'cancelled'
+                    eastmoney_selection['timestamp'] = datetime.now().isoformat()
+                    logger.info("[Eastmoney] User cancelled")
+
+                    feishu_api.send_message(
+                        receive_id=eastmoney_config.get('chat_id', ''),
+                        content="❌ 已取消操作。",
+                        msg_type="text"
+                    )
+                    return jsonify({'code': 0, 'msg': 'eastmoney cancelled'})
 
             # 处理消息（会自动发送回复）
             handler.process(text, user_open_id)

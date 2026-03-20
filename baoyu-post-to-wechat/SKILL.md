@@ -138,39 +138,73 @@ mkdir -p "$(pwd)/post-to-wechat/$(date +%Y-%m-%d)"
 - "Understanding AI Models" → `understanding-ai-models`
 - "人工智能的未来" → `ai-future` (translate to English for slug)
 
-### Step 2: Check Markdown-to-HTML Skill
+### Step 2: Auto-Discover Formatter Skills ⭐ NEW
 
 **Skip if**: Input is `.html` file
 
-**Skill Discovery**:
+**Skill Auto-Discovery**:
 
+The system automatically scans for formatter skills that conform to the standard interface contract.
+
+**Scan Paths**:
 ```bash
-# Check if baoyu-markdown-to-html exists
-test -f skills/baoyu-markdown-to-html/SKILL.md && echo "found"
+~/.claude/skills/*-formatter/SKILL.md
+~/Desktop/DMS/skills/*-formatter/SKILL.md
+~/.claude/技能库/*-formatter/SKILL.md
+```
+
+**Detection Criteria**:
+1. `SKILL.md` contains `markdown-to-html` capability declaration
+2. Provides JSON output interface (follows standard contract)
+3. Supports command-line invocation with `--json` parameter
+
+**Priority Configuration**:
+```
+~/.claude/skills/formatter-priority.yaml
+```
+
+Default priority order:
+1. `wechat-formatter` (wuxin, petcircle themes)
+2. `baoyu-markdown-to-html` (default, grace, simple themes)
+
+**Manual Selection**:
+Users can override auto-selection via `--skill` parameter:
+```bash
+--skill wechat-formatter --theme wuxin
+--skill baoyu-markdown-to-html --theme grace
+```
+
+**List Available Formatters**:
+```bash
+npx -y bun ${SKILL_DIR}/scripts/skill-discovery.ts --list
 ```
 
 | Result | Action |
 |--------|--------|
-| Found | Read its SKILL.md, continue to Step 3 |
-| Multiple skills | AskUserQuestion to choose |
-| Not found | Show installation suggestion |
+| Found skills | Use highest priority (or user-specified via --skill) |
+| No skills | Show installation suggestion |
+| User specifies --skill | Use specified skill, validate it exists |
 
-**When Not Found**:
-
+**When No Skills Found**:
 ```
-No markdown-to-html skill found.
+No formatter skills found.
 
-Suggested installation:
-https://github.com/JimLiu/baoyu-skills/blob/main/skills/baoyu-markdown-to-html/SKILL.md
+Suggested installations:
+- wechat-formatter: ~/.claude/skills/wechat-formatter/
+- baoyu-markdown-to-html: https://github.com/JimLiu/baoyu-skills/tree/main/skills/baoyu-markdown-to-html
 
 Options:
-A) Cancel - install the skill first
+A) Install a formatter skill first
 B) Continue - provide HTML file manually
 ```
 
-### Step 3: Convert Markdown to HTML
+### Step 3: Convert Markdown to HTML (via Selected Formatter)
 
 **Skip if**: Input is `.html` file
+
+**Formatter Invocation**:
+
+The selected formatter is invoked with standard parameters:
 
 1. **Ask theme preference** (unless specified in EXTEND.md or CLI):
 

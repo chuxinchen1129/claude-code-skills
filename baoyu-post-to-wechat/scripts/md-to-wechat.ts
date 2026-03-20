@@ -9,6 +9,9 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
+// 导入技能发现系统
+import { SkillDiscovery, FormatterSkill } from './skill-discovery.js';
+
 interface ImageInfo {
   placeholder: string;
   localPath: string;
@@ -227,12 +230,26 @@ Usage:
 
 Options:
   --title <title>     Override title
-  --theme <name>      Theme name (default, grace, simple)
+  --theme <name>      Theme name (default, grace, simple, wuxin, petcircle)
+  --skill <name>      Use specific formatter skill (auto-detect if not specified)
+  --list-formatters   List all available formatter skills
   --help              Show this help
+
+Skill Auto-Discovery:
+  The system automatically scans for formatter skills in:
+  - ~/.claude/skills/*-formatter/
+  - ~/Desktop/DMS/skills/*-formatter/
+  - ~/.claude/技能库/*-formatter/
+
+  Priority order (configured in formatter-priority.yaml):
+  1. wechat-formatter (wuxin, petcircle themes)
+  2. baoyu-markdown-to-html (default, grace, simple themes)
 
 Output JSON format:
 {
   "title": "Article Title",
+  "author": "Author Name",
+  "summary": "Article summary",
   "htmlPath": "/tmp/wechat-article-images/temp-article.html",
   "contentImages": [
     {
@@ -243,9 +260,16 @@ Output JSON format:
   ]
 }
 
-Example:
+Examples:
+  # Auto-detect and use highest priority formatter
   npx -y bun md-to-wechat.ts article.md
-  npx -y bun md-to-wechat.ts article.md --theme grace
+
+  # Use specific formatter with theme
+  npx -y bun md-to-wechat.ts article.md --skill wechat-formatter --theme wuxin
+  npx -y bun md-to-wechat.ts article.md --skill wechat-formatter --theme petcircle
+
+  # List all available formatters
+  npx -y bun md-to-wechat.ts --list-formatters
 `);
   process.exit(0);
 }
@@ -256,9 +280,18 @@ async function main(): Promise<void> {
     printUsage();
   }
 
+  // 处理 --list-formatters 参数
+  if (args.includes('--list-formatters') || args.includes('-l')) {
+    const discovery = new SkillDiscovery();
+    const list = await discovery.listFormatters();
+    console.log(list);
+    process.exit(0);
+  }
+
   let markdownPath: string | undefined;
   let title: string | undefined;
   let theme: string | undefined;
+  let skillName: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -266,9 +299,21 @@ async function main(): Promise<void> {
       title = args[++i];
     } else if (arg === '--theme' && args[i + 1]) {
       theme = args[++i];
+    } else if (arg === '--skill' && args[i + 1]) {
+      skillName = args[++i];
     } else if (!arg.startsWith('-')) {
       markdownPath = arg;
     }
+  }
+
+  // 如果没有指定文件，显示帮助
+  if (!markdownPath && !skillName) {
+    printUsage();
+  }
+
+  // 如果只是列出格式化器，不继续处理
+  if (args.includes('--list-formatters')) {
+    return;
   }
 
   if (!markdownPath) {
@@ -281,7 +326,48 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const result = await convertMarkdown(markdownPath, { title, theme });
+  // 技能发现和选择
+  let effectiveTheme = theme;
+  let effectiveSkill = skillName;
+
+  if (!effectiveSkill || !effectiveTheme) {
+    const discovery = new SkillDiscovery();
+    const selectedSkill = await discovery.selectFormatter(effectiveSkill, effectiveTheme);
+
+    if (!selectedSkill) {
+      console.error('Error: No suitable formatter skill found');
+      console.error('Please install one of the following:');
+      console.error('  - wechat-formatter: ~/.claude/skills/wechat-formatter/');
+      console.error('  - baoyu-markdown-to-html: https://github.com/JimLiu/baoyu-skills');
+      process.exit(1);
+    }
+
+    if (!effectiveSkill) {
+      effectiveSkill = selectedSkill.name;
+      console.error(`[md-to-wechat] Auto-selected formatter: ${selectedSkill.name}`);
+    }
+
+    if (!effectiveTheme && selectedSkill.themes.length > 0) {
+      effectiveTheme = selectedSkill.themes[0];
+      console.error(`[md-to-wechat] Using theme: ${effectiveTheme}`);
+    }
+  }
+
+  // 主题映射（baoyu 主题 → wechat-formatter 主题）
+  const themeMapping: Record<string, string> = {
+    'default': 'wuxin',
+    'grace': 'wuxin',
+    'simple': 'petcircle',
+  };
+
+  // 如果使用 wechat-formatter 且提供了 baoyu 主题，进行映射
+  if (effectiveSkill === 'wechat-formatter' && effectiveTheme && themeMapping[effectiveTheme]) {
+    console.error(`[md-to-wechat] Mapping baoyu theme '${effectiveTheme}' to '${themeMapping[effectiveTheme]}'`);
+    effectiveTheme = themeMapping[effectiveTheme];
+  }
+
+  // 使用选择的格式化器
+  const result = await convertMarkdown(markdownPath, { title, theme: effectiveTheme });
   console.log(JSON.stringify(result, null, 2));
 }
 

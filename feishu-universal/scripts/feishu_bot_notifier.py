@@ -120,13 +120,25 @@ class FeishuBotNotifier:
                             print(f"✗ 发送失败: [{error_code}] {error_msg}")
                             return False
                 else:
-                    # HTTP 错误
+                    # HTTP 错误 - 打印详细错误信息
                     if attempt < max_retries - 1:
                         print(f"⚠️ HTTP {response.status_code}，{retry_delay}秒后重试...")
+                        # 打印响应内容用于调试
+                        try:
+                            error_data = response.json()
+                            print(f"📋 API 响应: {json.dumps(error_data, ensure_ascii=False)}")
+                        except:
+                            print(f"📋 响应文本: {response.text[:500] if response.text else 'N/A'}")
                         time.sleep(retry_delay)
                         continue
                     else:
                         print(f"✗ 请求失败: HTTP {response.status_code}")
+                        # 打印响应内容用于调试
+                        try:
+                            error_data = response.json()
+                            print(f"📋 API 响应: {json.dumps(error_data, ensure_ascii=False)}")
+                        except:
+                            print(f"📋 响应文本: {response.text[:500] if response.text else 'N/A'}")
                         return False
 
             except requests.exceptions.Timeout:
@@ -270,7 +282,8 @@ class FeishuBotNotifier:
         else:
             image_key = image_path_or_key
 
-        url = f"{self.base_url}/im/v1/messages?receive_id_type=open_id"
+        # 使用 chat_id 而不是 user_open_id
+        url = f"{self.base_url}/im/v1/messages?receive_id_type=chat_id"
 
         headers = {
             "Authorization": f"Bearer {self.app_access_token}",
@@ -278,7 +291,7 @@ class FeishuBotNotifier:
         }
 
         payload = {
-            "receive_id": self.user_open_id,
+            "receive_id": self.chat_id,
             "msg_type": "image",
             "content": json.dumps({"image_key": image_key})
         }

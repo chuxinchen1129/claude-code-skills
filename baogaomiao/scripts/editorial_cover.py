@@ -62,9 +62,38 @@ class EditorialCoverGenerator:
         "汽车": ["汽车", "整车", "乘用车", "新能源汽车", "电动车"],
         "医疗器械": ["医疗器械", "医疗设备", "影像", "诊断"],
         "医药": ["医药", "药品", "生物药", "创新药", "仿制药"],
-        "食品饮料": ["食品", "饮料", "白酒", "乳制品", "调味品"],
+        "食品饮料": ["食品", "饮料", "白酒", "乳制品", "调味品", "啤酒"],
         "家电": ["家电", "空调", "冰箱", "洗衣机", "小家电"],
     }
+    CATEGORY_LABEL_NORMALIZATION = {
+        "AI/人工智能": "AI",
+        "连锁零售": "零售",
+        "食品饮料": "啤酒",
+        "行业研究": "行业",
+    }
+    REPORT_SUFFIXES = ["深度报告", "白皮书", "研究报告", "年度报告", "专题报告", "洞察报告"]
+    REPORT_NATURE_KEYWORDS = [
+        ("市场竞争", ["竞争", "格局", "份额", "CR", "集中度"]),
+        ("年度回顾", ["年度", "回顾", "复盘"]),
+        ("消费趋势", ["消费", "趋势", "偏好", "人群", "用户"]),
+        ("技术演进", ["技术", "迭代", "演进", "升级"]),
+        ("产业变革", ["产业", "产业链", "变革", "重构"]),
+        ("增长逻辑", ["增长", "逻辑", "驱动", "动因"]),
+        ("渠道变迁", ["渠道", "门店", "分销", "零售"]),
+        ("应用落地", ["应用", "落地", "场景"]),
+        ("投资机会", ["投资", "机会"]),
+        ("商业模式", ["商业模式", "变现", "盈利"]),
+    ]
+    GENERIC_TITLE_TERMS = [
+        "行业", "市场", "研究", "报告", "白皮书", "深度", "专题", "分析", "洞察",
+        "年度", "回顾", "竞争", "趋势", "消费", "市场竞争", "消费趋势", "年度回顾",
+        "研究报告", "深度报告", "白皮书", "专题报告", "洞察报告", "年度报告",
+    ]
+    THEME_PRIORITY_KEYWORDS = [
+        "高端化", "短剧", "智驾", "流量", "出海", "用户洞察", "产业链",
+        "技术升级", "渠道重构", "场景应用", "消费升级", "价格带", "数据经营",
+        "年轻化", "产品创新", "品牌升级", "内容生态"
+    ]
 
     # 长度限制常量
     MAX_CHINESE_TITLE_LENGTH = 20  # 中文标题总长度最多20字（不含年份前缀）
@@ -136,7 +165,7 @@ class EditorialCoverGenerator:
     </script>
 </head>
 <body class="bg-bgBase flex items-center justify-center p-8 font-noto-sans text-textMain" style="min-height: 100vh;">
-    <div id="editorial-card-container" class="rounded-xl overflow-hidden shadow-editorial paper-noise bg-bgBase" style="width: 640px; height: 900px;">
+    <div id="editorial-card-container" class="rounded-xl overflow-hidden shadow-editorial paper-noise bg-bgBase" style="width: 648px; height: 864px;">
         <div class="content-wrapper p-10 flex flex-col" style="height: 100%; display: flex; flex-direction: column;">
             <!-- Header -->
             <header class="pb-6 border-b-3 border-textMain" style="flex-shrink: 0;">
@@ -238,8 +267,8 @@ class EditorialCoverGenerator:
             'max_english_length': 25,
             'max_highlight_title_length': 60,
             'max_summary_text_length': 80,
-            'container_width': 800,
-            'container_height': 1066,
+            'container_width': 648,
+            'container_height': 864,
             'page_num_font_scale': 2.0,
             'title_font_scale': 1.0,
             'default_output_dir': Path(__file__).parent / "covers"
@@ -325,7 +354,8 @@ class EditorialCoverGenerator:
         report_type: str = "行业研究报告",
         category: str = "",
         number: Optional[str] = None,
-        output_filename: Optional[str] = None
+        output_filename: Optional[str] = None,
+        neutralize_title: bool = False
     ) -> Dict:
         """
         生成现代社论风HTML封面
@@ -355,42 +385,9 @@ class EditorialCoverGenerator:
             date_full = now.strftime("%Y.%m.%d")
             day = now.strftime("%d")
 
-            # 处理中文标题：保留年份，去掉emoji，品牌中立化，语义断行
-            # 提取年份前缀（如 2026）
-            year_prefix = ""
-            title_content = chinese_title
-
-            # 匹配年份（带或不带emoji）
-            year_match = re.search(r'[🎯🍼📊🚀💡✨🔥💪⭐]?(\d{4})', chinese_title)
-            if year_match:
-                year_prefix = year_match.group(1)  # 只要年份，不要emoji
-                title_content = chinese_title[year_match.end():]  # 剩余部分
-
-            # 品牌中立化处理
-            title_content = self._neutralize_brand(title_content)
-
-            # 清理剩余内容：移除emoji和其他符号
-            for emoji in ["🎯", "🍼", "📊", "🚀", "💡", "✨", "🔥", "💪", "⭐", "——", "—", " "]:
-                title_content = title_content.replace(emoji, "")
-
-            # 截断到最多25字
-            if len(title_content) > self.MAX_CHINESE_TITLE_LENGTH:
-                title_content = title_content[:self.MAX_CHINESE_TITLE_LENGTH]
-
-            # 使用智能语义断行（避免在词中间断开）
-            if '\n' in title_content or '\\n' in title_content:
-                # 用户指定了换行位置
-                content_lines_html = title_content.replace('\n', '<br>').replace('\\n', '<br>')
-            else:
-                # 使用语义断行（智能断词）
-                content_lines = self._split_title_by_semantics(title_content)
-                content_lines_html = "<br>".join(content_lines) if len(content_lines) > 1 else title_content
-
-            # 组合年份 + 内容（年份不带emoji）
-            if year_prefix:
-                title_lines_html = f"{year_prefix}<br>{content_lines_html}"
-            else:
-                title_lines_html = content_lines_html
+            year_prefix = "2026"
+            line2, line3 = self._resolve_cover_title_lines(chinese_title, neutralize_title=neutralize_title)
+            title_lines_html = f"{year_prefix}<br>{line2}<br>{line3}"
 
             # 英文标题大写 + 长度限制
             english_upper = english_title.upper()
@@ -439,8 +436,8 @@ class EditorialCoverGenerator:
 
             # 动态替换模板中的固定值
             html_template = self.HTML_TEMPLATE
-            html_template = html_template.replace("width: 640px;", f"width: {self.container_width}px;")
-            html_template = html_template.replace("height: 853px;", f"height: {self.container_height}px;")
+            html_template = html_template.replace("width: 648px;", f"width: {self.container_width}px;")
+            html_template = html_template.replace("height: 864px;", f"height: {self.container_height}px;")
             html_template = html_template.replace("text-[5rem]", f"text-[{page_num_font_size}rem]")
 
             # 生成HTML
@@ -509,6 +506,217 @@ class EditorialCoverGenerator:
         for biased, neutral in self.BRAND_NEUTRALIZE_PATTERNS:
             result = result.replace(biased, neutral)
         return result
+
+    def _resolve_cover_title_lines(self, chinese_title: str, neutralize_title: bool = False) -> tuple[str, str]:
+        """按封面规则生成第2/3行标题。"""
+        title_content = self._strip_title_metadata(chinese_title)
+        if neutralize_title:
+            title_content = self._neutralize_brand(title_content)
+
+        industry_keyword = self._normalize_category_label(self._extract_category(title_content))
+        theme_keyword = self._extract_theme_keyword(title_content, industry_keyword)
+        line2 = self._compose_line2(industry_keyword, theme_keyword)
+        line3 = self._compose_line3(title_content, line2)
+        return self._fit_line(line2), self._fit_line(line3)
+
+    def _strip_title_metadata(self, title: str) -> str:
+        """移除年份、emoji 和排版符号，只保留主题文本。"""
+        title = re.sub(r'[🎯🍼📊🚀💡✨🔥💪⭐]?\d{4}', '', title)
+        for token in ["🎯", "🍼", "📊", "🚀", "💡", "✨", "🔥", "💪", "⭐", "——", "—"]:
+            title = title.replace(token, "")
+        title = title.replace("｜", "").replace("|", "").replace("\\n", "").replace("\n", "")
+        title = re.sub(r'\s+', '', title)
+        return title.strip()
+
+    def _normalize_category_label(self, category: str) -> str:
+        return self.CATEGORY_LABEL_NORMALIZATION.get(category, category)
+
+    def _extract_theme_keyword(self, text: str, industry_keyword: str) -> str:
+        """提取与行业词并列的主题关键词。"""
+        working = text
+        if industry_keyword:
+            working = working.replace(industry_keyword, "")
+
+        working = working.replace("中国", "").replace("全球", "").replace("国内", "")
+        for term in self.GENERIC_TITLE_TERMS + self.REPORT_SUFFIXES:
+            working = working.replace(term, "")
+
+        for keyword in self.THEME_PRIORITY_KEYWORDS:
+            if keyword in working:
+                return keyword
+
+        candidates = re.findall(r'[A-Za-z0-9\u4e00-\u9fff]+', working)
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate or candidate == industry_keyword:
+                continue
+            if len(candidate) < 2:
+                continue
+            if candidate in self.GENERIC_TITLE_TERMS:
+                continue
+            if candidate.startswith("行业研究") or candidate.startswith("研究报告"):
+                continue
+            return candidate[: max(2, self.MAX_CHINESE_CHARS_PER_LINE - len(industry_keyword))]
+
+        for keyword in self.THEME_PRIORITY_KEYWORDS:
+            if keyword in text and keyword != industry_keyword:
+                return keyword
+        return "核心主题"
+
+    def _compose_line2(self, industry_keyword: str, theme_keyword: str) -> str:
+        industry_keyword = industry_keyword or "行业"
+        theme_keyword = theme_keyword or "核心主题"
+
+        if theme_keyword in industry_keyword:
+            line2 = industry_keyword
+        elif industry_keyword in theme_keyword:
+            line2 = theme_keyword
+        else:
+            line2 = f"{industry_keyword}{theme_keyword}"
+
+        if len(line2) <= self.MAX_CHINESE_CHARS_PER_LINE:
+            return line2
+
+        remaining = max(2, self.MAX_CHINESE_CHARS_PER_LINE - len(industry_keyword))
+        return f"{industry_keyword}{theme_keyword[:remaining]}"
+
+    def _compose_line3(self, text: str, line2: str) -> str:
+        suffix = self._detect_report_suffix(text)
+        nature = self._detect_report_nature(text)
+        line3 = f"{nature}{suffix}"
+        line3 = self._dedupe_line3(line2, line3)
+        return self._ensure_report_suffix(line3)
+
+    def _detect_report_suffix(self, text: str) -> str:
+        for suffix in self.REPORT_SUFFIXES:
+            if suffix in text:
+                return suffix
+        return "深度报告"
+
+    def _detect_report_nature(self, text: str) -> str:
+        for nature, keywords in self.REPORT_NATURE_KEYWORDS:
+            if any(keyword in text for keyword in keywords):
+                return nature
+        return "市场竞争"
+
+    def _dedupe_line3(self, line2: str, line3: str) -> str:
+        """避免第2/3行重复词。"""
+        for term in sorted(self.GENERIC_TITLE_TERMS + list(self.CATEGORY_KEYWORDS.keys()), key=len, reverse=True):
+            if term and term in line2 and term in line3:
+                line3 = line3.replace(term, "")
+
+        line3 = line3.replace("行业行业", "行业").replace("市场市场", "市场")
+        line3 = re.sub(r'^(?:行业|市场|AI)+', '', line3)
+        line3 = line3.strip("｜|-— ")
+        return line3 or "深度报告"
+
+    def _ensure_report_suffix(self, line3: str) -> str:
+        if any(line3.endswith(suffix) for suffix in self.REPORT_SUFFIXES):
+            return line3
+        return f"{line3}深度报告"
+
+    def _fit_line(self, line: str) -> str:
+        if len(line) <= self.MAX_CHINESE_CHARS_PER_LINE:
+            return line
+        return line[:self.MAX_CHINESE_CHARS_PER_LINE]
+
+    def _split_title_new_format(self, text: str) -> list:
+        """按新规则断句：第2行=报告主题，第3行=修饰词+报告性质
+        
+        规则：
+        - 第2行：报告主题（核心议题）
+        - 第3行：修饰词+报告性质（如深度研究报告｜市场竞争），用词与第2行不重复
+
+        Args:
+            text: 标题文本
+
+        Returns:
+            [报告主题, 修饰词+报告性质]
+        """
+        if not text:
+            return ["", ""]
+        
+        text = text.strip()
+        
+        # 常见的报告性质词（用于第3行）
+        report_types = [
+            '研究', '分析', '报告', '白皮书', '解析', '拆解', '洞察', 
+            '趋势', '前景', '市场', '行业', '深度', '全面', '总结',
+            '年度', '季度', '月度', '周度', '投资', '策略', '机会'
+        ]
+        
+        # 常见的修饰词（用于第3行开头）
+        modifiers = [
+            '深度', '全面', '系统', '最新', '权威', '专业', '独家',
+            '前瞻', '实战', '精品', '重磅', '精简'
+        ]
+        
+        # 查找报告性质词的位置
+        type_pos = -1
+        type_word = ""
+        for rt in report_types:
+            pos = text.find(rt)
+            if pos != -1 and (type_pos == -1 or pos < type_pos):
+                type_pos = pos
+                type_word = rt
+        
+        # 查找修饰词的位置
+        mod_pos = -1
+        mod_word = ""
+        for mod in modifiers:
+            pos = text.find(mod)
+            if pos != -1 and (mod_pos == -1 or pos < mod_pos):
+                mod_pos = pos
+                mod_word = mod
+        
+        # 断句逻辑
+        if type_pos > 0:
+            # 找到报告性质词，作为第3行的开头
+            # 第2行：从开头到type_pos + type_word
+            line2 = text[:type_pos + len(type_word)].strip()
+            # 第3行：type_word之后的剩余部分，或者 type_word 本身 + 剩余
+            line3_rest = text[type_pos + len(type_word):].strip()
+            
+            if mod_word and mod_word not in line2:
+                # 有修饰词，放在第3行开头
+                line3 = f"{mod_word}{type_word}"
+            else:
+                line3 = type_word
+            
+            if line3_rest:
+                line3 += f"｜{line3_rest}"
+            elif mod_word and mod_word not in line3:
+                line3 = f"{mod_word}{line3}"
+            
+            # 如果第3行为空，使用默认
+            if not line3.strip():
+                line3 = f"{type_word}报告"
+        else:
+            # 没有找到报告性质词，平均分
+            mid = len(text) // 2
+            line2 = text[:mid].strip()
+            line3 = text[mid:].strip()
+            
+            # 如果第3行太短，合并到第2行
+            if len(line3) < 3:
+                line2 = text.strip()
+                line3 = "研究报告"
+        
+        # 确保第3行不为空
+        if not line3.strip():
+            line3 = "研究报告"
+        
+        # 清理重复用词
+        if line2 and line3:
+            # 如果第3行的开头词已在第2行出现，尝试调整
+            for mod in modifiers:
+                if line3.startswith(mod) and mod in line2:
+                    # 尝试去掉重复
+                    line3 = line3[len(mod):].strip()
+                    if line3 and not line3.startswith('｜'):
+                        line3 = "｜" + line3
+        
+        return [line2, line3]
 
     def _split_title_by_semantics(self, text: str) -> list:
         """按语义断句，避免在词中间断开

@@ -94,14 +94,14 @@ class BaogaomiaoTaskProcessor:
             if not pdf_path or not os.path.exists(pdf_path):
                 self._update_task_status(task_file, 'failed',
                                       error='PDF文件不存在')
-                return
+                return {'success': False, 'error': 'PDF文件不存在', 'task_id': task_id}
 
             pdf_extractor = PDFExtractor(
                 pdf_path,
                 enable_screenshots=self.enable_screenshots,
                 screenshot_dir=self.screenshot_dir
             )
-            extract_result = pdf_extractor.extract(max_pages=5)
+            extract_result = pdf_extractor.extract(max_pages=None)  # 提取全部内容
 
             if not extract_result['success']:
                 self._update_task_status(task_file, 'failed',
@@ -128,7 +128,7 @@ class BaogaomiaoTaskProcessor:
             # 步骤2.2：自动重命名 PDF 文件（在飞书发送前）
             try:
                 renamer = PDFRenamer()
-                new_filename = renamer.generate_filename(chinese_title, Path(pdf_path))
+                new_filename = renamer.generate_filename(chinese_title)
                 rename_result = renamer.rename_pdf(Path(pdf_path), new_filename)
 
                 if rename_result['success']:
@@ -270,15 +270,62 @@ class BaogaomiaoTaskProcessor:
 
     def _generate_chinese_title(self, pdf_text):
         """生成中文标题（🎯2026开头）"""
-        # 简化版本：从PDF文本中提取核心内容
-        # 实际应用中应由Claude Code执行完整分析
+        import re
 
-        # 这里生成一个基础的标题
-        return f"🎯2026 PDF内容总结"
+        try:
+            # 优先从文本内容中识别主题
+            if 'AI短剧发展研究报告' in pdf_text:
+                return "🎯AI短剧发展研究报告"
+            elif 'AI短剧' in pdf_text:
+                return "🎯AI短剧行业分析"
+            elif 'AI视频行业深度报告' in pdf_text:
+                return "🎯AI视频行业深度报告"
+            elif 'AI视频' in pdf_text and '报告' in pdf_text:
+                return "🎯AI视频行业报告"
+            elif '微短剧行业' in pdf_text:
+                return "🎯微短剧行业发展报告"
+            elif '短剧行业' in pdf_text:
+                return "🎯短剧行业研究报告"
+            elif 'AI营销' in pdf_text:
+                return "🎯AI营销行业报告"
+            elif 'AI' in pdf_text and '游戏' in pdf_text:
+                return "🎯AI游戏行业报告"
+            elif 'AI' in pdf_text and '传媒' in pdf_text:
+                return "🎯AI传媒应用报告"
+            elif '母婴行业' in pdf_text:
+                return "🎯母婴行业深度报告"
+            elif '啤酒行业' in pdf_text:
+                return "🎯啤酒行业研究报告"
+            elif '快消行业' in pdf_text:
+                return "🎯快消行业报告"
+            elif '光通信' in pdf_text:
+                return "🎯光通信行业报告"
+            elif 'AI' in pdf_text:
+                return "🎯AI行业研究报告"
+            elif '营销' in pdf_text:
+                return "🎯营销行业报告"
+            else:
+                return "🎯2026行业研究报告"
+
+        except Exception as e:
+            logger.warning(f"生成标题失败: {e}")
+            return "🎯2026行业研究报告"
 
     def _generate_english_title(self, chinese_title):
         """生成英文标题"""
-        return "PDF Summary"
+        # 根据中文标题生成对应的英文标题
+        if 'AI短剧' in chinese_title or '短剧' in chinese_title:
+            return "AI Short Drama Industry Report"
+        elif 'AI视频' in chinese_title:
+            return "AI Video Industry Report"
+        elif '微短剧' in chinese_title:
+            return "Micro-Drama Industry Report"
+        elif '营销' in chinese_title:
+            return "Marketing Industry Report"
+        elif 'AI' in chinese_title:
+            return "AI Industry Report"
+        else:
+            return "Industry Research Report"
 
     def _extract_year(self, chinese_title):
         """从中文标题提取年份
@@ -421,6 +468,12 @@ def main():
         # 处理指定任务
         logger.info(f"\n处理任务: {args.process}")
         result = processor.process_task(args.process)
+
+        # 确保result不为None，防止TypeError
+        if result is None:
+            logger.error("process_task返回了None，应该是字典格式")
+            result = {'success': False, 'error': 'process_task返回None', 'task_id': 'unknown'}
+
         if result['success']:
             logger.info(f"\n✓ 任务 {result['task_id']} 处理完成")
             logger.info(f"  中文标题: {result.get('chinese_title', '')}")

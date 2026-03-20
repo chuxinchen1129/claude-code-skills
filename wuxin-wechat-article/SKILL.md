@@ -79,7 +79,20 @@ python src/html_formatter.py input.md -o output.html
 
 ---
 
-## HTML 格式化 ⭐ NEW
+## HTML 格式化 ⭐
+
+> **推荐使用统一排版工具**：
+> 对于 Markdown 转 HTML 排版，推荐使用 **`wechat-formatter`** skill，它支持：
+> - 自动检测文章类型（悟昕/宠商圈）
+> - 统一的品牌样式管理
+> - 更好的维护性
+>
+> 使用方法：
+> ```
+> python ~/.claude/skills/wechat-formatter/scripts/format.py input.md -o output.html -t wuxin
+> ```
+>
+> 本项目的 `html_formatter.py` 仍可继续使用。
 
 ### 悟昕品牌样式
 
@@ -192,8 +205,33 @@ defaults:
 
 ---
 
+## 风格控制 ⭐ NEW
+
+生成内容后，**自动调用** `writing-style-standardizer` 进行风格统一：
+
+```yaml
+风格模式: 通用科普风格 / 品牌推广风格
+品牌调性: 悟昕（科学循证 + 温暖治愈 + 优雅克制）
+检查级别: 基础
+```
+
+**核心要求**：
+- ✅ 标题：15-25字，疑问/亮点式
+- ✅ 开篇：场景化引入，避免无效铺垫
+- ✅ 段落：80-120字，空行分隔
+- ✅ 数据：引用《睡眠健康调查报告》等权威来源
+- ✅ 禁止词：绝绝子、神级、根治、第一等
+
+**品牌植入原则**：
+- 超软性："搜「睡眠管理」" 而非 "立即购买"
+- 一次一处：不要堆砌卖点
+- 场景化：在解决方案中自然呈现
+
+---
+
 ## 相关文档
 
+- **风格标准化器**：`skills/writing-style-standardizer/SKILL.md`
 - **悟昕HTML样式规范**：`03_WUXIN_CONTENT/assets/templates/wuxin-html-style.md`
 - 公众号文章模板：`03_WUXIN_CONTENT/assets/templates/wechat-article/`
 - 睡眠科学 Wiki：`03_WUXIN_CONTENT/05_Sleep_Science_Wiki/`

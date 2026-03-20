@@ -27,12 +27,15 @@ class PDFRenamer:
     # 年份模式（匹配 2024-2029）
     YEAR_PATTERN = re.compile(r'20[2-9][0-9]')
 
-    # 常见报告类型后缀
+    # 常见报告类型后缀（需要保留的完整名称）
     REPORT_SUFFIXES = [
-        '研究报告', '行业报告', '趋势报告', '白皮书', '洞察报告',
-        '分析报告', '年度报告', '季度报告', '调研报告', '发展报告',
+        '行业报告', '趋势报告', '白皮书', '洞察报告',
+        '分析报告', '年度报告', '季度报告', '调研报告',
         '数据报告', '经营报告', '竞争报告', '市场报告', '案例报告'
     ]
+
+    # 需要保留完整名称的报告类型（不移除）
+    KEEP_FULL_NAME_SUFFIXES = ['研究报告', '发展报告']
 
     def __init__(self, default_year: str = "2026"):
         """
@@ -47,28 +50,31 @@ class PDFRenamer:
         """
         根据中文标题生成标准化文件名
 
-        命名格式：[机构]报告名称.pdf
-        - 机构：研究机构名称（如有）
-        - 报告名称：12个中文字以内（移除emoji和年份）
+        命名格式：MMDD-年份+报告名称.pdf
+        - MMDD：当前日期（月日），如 0313
+        - 年份：从标题提取（如 2026），默认使用 2026
+        - 报告名称：12个中文字以内（移除emoji和已提取的年份）
 
         Args:
             chinese_title: 中文标题（如：🎯2026 母婴连锁经营数据报告 —— 逆势增长密码）
-            org_name: 研究机构名称（如：国金证券股份有限公司）
+            org_name: 研究机构名称（暂未使用，保留参数兼容性）
             pdf_path: 原 PDF 文件路径（可选，用于保留扩展名）
 
         Returns:
-            新文件名（如：[国金证券]家电材料基石稳固.pdf）
+            新文件名（如：0313-2026母婴连锁经营数据报告.pdf）
         """
+        # 提取年份
+        year = self._extract_year(chinese_title) or self.default_year
+
         # 提取报告名称
         name = self._extract_report_name(chinese_title)
 
-        # 组合文件名：[机构]报告名称.pdf
-        if org_name:
-            # 简化机构名称（移除"股份有限公司"、"证券"等后缀）
-            short_org = self._shorten_org_name(org_name)
-            new_name = f"[{short_org}]{name}.pdf"
-        else:
-            new_name = f"{name}.pdf"
+        # 获取当前日期（MMDD格式）
+        current_date = datetime.now()
+        date_prefix = current_date.strftime('%m%d')
+
+        # 组合文件名：MMDD-年份+报告名称.pdf
+        new_name = f"{date_prefix}-{year}{name}.pdf"
 
         return new_name
 
@@ -99,20 +105,20 @@ class PDFRenamer:
 
     def _extract_report_name(self, title: str) -> str:
         """
-        从标题中提取报告名称（12个中文字以内）
+        从标题中提取报告名称（15个中文字以内）
 
         处理步骤：
         1. 移除 emoji
         2. 移除年份前缀（如 "2026 "）
         3. 移除 "——" 后的副标题
-        4. 移除已知的报告类型后缀（避免重复）
-        5. 截取前12个字符
+        4. 智能处理后缀：只在名称足够长时才移除
+        5. 截取前15个字符
 
         Args:
             title: 原始中文标题
 
         Returns:
-            报告名称（12字以内）
+            报告名称（15字以内）
         """
         # 1. 移除 emoji
         name = title
@@ -130,19 +136,28 @@ class PDFRenamer:
         elif '—' in name:
             name = name.split('—')[0].strip()
 
-        # 4. 移除已知报告类型后缀（简化名称）
+        # 4. 智能处理后缀：只在名称足够长时才移除
         base_name = name
-        for suffix in self.REPORT_SUFFIXES:
-            if base_name.endswith(suffix):
-                base_name = base_name[:-len(suffix)].strip()
+
+        # 检查是否需要保留完整名称（对于"研究报告"和"发展报告"等）
+        keep_full = False
+        for keep_suffix in self.KEEP_FULL_NAME_SUFFIXES:
+            if base_name.endswith(keep_suffix):
+                keep_full = True
                 break
 
-        # 如果移除后缀后太短，保留原名称
-        if len(base_name) < 4:
-            base_name = name
+        # 只有当不需要保留完整名称，且名称长度超过8个字时，才尝试移除后缀
+        if not keep_full and len(base_name) > 8:
+            for suffix in self.REPORT_SUFFIXES:
+                if base_name.endswith(suffix):
+                    shortened = base_name[:-len(suffix)].strip()
+                    # 移除后缀后至少要保留4个字
+                    if len(shortened) >= 4:
+                        base_name = shortened
+                    break
 
-        # 5. 截取前12个字符
-        report_name = base_name[:12]
+        # 5. 截取前15个字符（从12增加到15）
+        report_name = base_name[:15]
 
         return report_name
 

@@ -4,14 +4,17 @@
 快速发送图片到飞书
 """
 
-import sys
 import os
+from pathlib import Path
+
+# 动态获取用户目录
+USER_HOME = str(Path.home())
 
 # 切换到正确的目录
-os.chdir('/Users/echochen/Desktop/DMS/skills/baogaomiao/scripts')
+os.chdir(f'{USER_HOME}/Desktop/DMS/skills/baogaomiao/scripts')
 
-# 添加当前目录到 Python 路径
-sys.path.insert(0, '/Users/echochen/Desktop/DMS/skills/feishu-universal/scripts')
+# 添加 feishu-universal 路径
+sys.path.insert(0, f'{USER_HOME}/Desktop/DMS/skills/feishu-universal/scripts')
 
 # 导入 FeishuBotNotifier
 from feishu_bot_notifier import FeishuBotNotifier

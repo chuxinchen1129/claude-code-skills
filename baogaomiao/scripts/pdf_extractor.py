@@ -17,7 +17,7 @@ class PDFExtractor:
 
     def __init__(self, pdf_path, enable_screenshots=False, screenshot_dir=None, zoom=2.0):
         self.pdf_path = Path(pdf_path)
-        self.available_libs = []
+        self.available_libs = self._detect_available_libs()  # 检测可用的PDF解析库
         self.primary_lib = None
         # 截图配置
         self.enable_screenshots = enable_screenshots
@@ -31,7 +31,7 @@ class PDFExtractor:
 
         # 检查 PyPDF2
         try:
-            import PyPDF2
+            from PyPDF2 import PdfReader
             libs.append('pypdf2')
         except ImportError:
             pass
@@ -226,6 +226,7 @@ class PDFExtractor:
     def _extract_with_pymupdf(self, max_pages=None):
         """使用 pymupdf (fitz) 提取文本"""
         import fitz
+        # 只导入一次，避免重复导入问题
 
         text_parts = []
         screenshots = []
@@ -424,8 +425,7 @@ class PDFExtractor:
         Returns:
             dict: 提取结果，包含文本、使用的库、页数等
         """
-        self.available_libs = self._detect_available_libs()
-
+        # 不在extract方法中重复检测库，使用__init__中已经检测到的库
         if not self.available_libs:
             return {
                 'success': False,
@@ -454,7 +454,13 @@ class PDFExtractor:
 
         return {
             'success': False,
-            'error': f'所有可用库提取失败: {self.available_libs}'
+            'error': f'所有可用库提取失败: {self.available_libs}',
+            'lib': None,
+            'text': '',
+            'total_pages': 0,
+            'extracted_pages': 0,
+            'screenshots': [],
+            'screenshot_count': 0
         }
 
 

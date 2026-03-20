@@ -24,6 +24,7 @@ from pathlib import Path
 from topic_pool import generate_topic_pool, save_topic_pool
 from topic_rater import rate_all_topics, save_rating_result
 from script_gen import generate_scripts_from_topics, save_scripts_to_excel
+from xhs_batch import generate_xhs_batch, save_xhs_batch_to_csv
 
 # ==================== 配置 ====================
 
@@ -243,11 +244,75 @@ def cmd_full_pipeline(args):
     }
 
 
+def cmd_xhs_batch(args):
+    """
+    小红书批量内容生成
+    """
+    from datetime import datetime, timedelta
+
+    print(f"\n{'='*60}")
+    print(f"小红书科普图文 - 批量生成")
+    print(f"{'='*60}")
+    print(f"营销节点: {args.node}")
+
+    # 处理日期参数
+    if args.days:
+        today = datetime.now()
+        start_date = today.strftime("%Y-%m-%d")
+        end_date = (today + timedelta(days=args.days - 1)).strftime("%Y-%m-%d")
+    elif args.start_date and args.end_date:
+        start_date = args.start_date
+        end_date = args.end_date
+    else:
+        print("❌ 需要指定 --days 或 --start-date + --end-date")
+        sys.exit(1)
+
+    print(f"日期范围: {start_date} 到 {end_date}")
+
+    # 营销日历路径
+    calendar_path = None
+    if args.calendar:
+        calendar_path = Path(args.calendar)
+
+    # Wiki 路径
+    wiki_path = PROJECT_ROOT / "../../03_WUXIN_CONTENT/05_Sleep_Science_Wiki/sleep_science.json"
+
+    # 生成内容
+    contents = generate_xhs_batch(
+        start_date=start_date,
+        end_date=end_date,
+        marketing_node=args.node,
+        calendar_path=calendar_path,
+        wiki_path=wiki_path
+    )
+
+    print(f"\n✅ 生成完成: {len(contents)}篇内容")
+
+    # 保存
+    output_dir = Path(args.output) if args.output else DEFAULT_OUTPUT_DIR
+    filename = f"Content_{start_date}_to_{end_date}.csv"
+    csv_path = save_xhs_batch_to_csv(contents, output_dir, filename)
+
+    print(f"\n📁 已保存: {csv_path}")
+
+    # 统计
+    if contents:
+        total_words = sum(c.get("字数统计", 0) for c in contents)
+        avg_words = total_words / len(contents)
+
+        print(f"\n📊 统计:")
+        print(f"  - 总篇数: {len(contents)}")
+        print(f"  - 总字数: {total_words}")
+        print(f"  - 平均字数: {avg_words:.0f}")
+
+    return contents
+
+
 # ==================== 主函数 ====================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="悟昕内容生成器 v2.0",
+        description="悟昕内容生成器 v2.1 - 整合版",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -258,6 +323,10 @@ def main():
   python main.py topic-pool --node "常规投放"
   python main.py rate --input "常规投放_话题池.xlsx" --target-count 18
   python main.py scripts --input "常规投放_Top18选题.xlsx"
+
+  # 小红书批量生成
+  python main.py xhs-batch --node "常规投放" --days 7
+  python main.py xhs-batch --node "常规投放" --start-date 2026-02-26 --end-date 2026-03-05
         """
     )
 
@@ -286,6 +355,15 @@ def main():
     parser_scripts.add_argument("--brand-integration", choices=["soft", "medium", "hard"], default="soft", help="品牌植入程度")
     parser_scripts.add_argument("--output", "-o", help="输出目录")
 
+    # ---------- xhs-batch ----------
+    parser_xhs = subparsers.add_parser("xhs-batch", help="小红书批量内容生成")
+    parser_xhs.add_argument("--node", required=True, help="营销节点（如'常规投放'、'春节送礼'）")
+    parser_xhs.add_argument("--days", type=int, help="生成天数（从今天开始）")
+    parser_xhs.add_argument("--start-date", help="开始日期（YYYY-MM-DD）")
+    parser_xhs.add_argument("--end-date", help="结束日期（YYYY-MM-DD）")
+    parser_xhs.add_argument("--calendar", help="营销日历CSV路径（可选）")
+    parser_xhs.add_argument("--output", "-o", help="输出目录")
+
     # ---------- full-pipeline ----------
     parser_full = subparsers.add_parser("full-pipeline", help="完整流程（一键执行）")
     parser_full.add_argument("--node", required=True, help="营销节点（如'常规投放'、'春节送礼'）")
@@ -306,6 +384,8 @@ def main():
         cmd_rate(args)
     elif args.command == "scripts":
         cmd_scripts(args)
+    elif args.command == "xhs-batch":
+        cmd_xhs_batch(args)
     elif args.command == "full-pipeline":
         cmd_full_pipeline(args)
     else:

@@ -189,28 +189,27 @@ python cli.py generate --type script --node "常规投放"
 
 ## 配置说明
 
-### 共享品牌规范
+### 共享品牌规范 ⭐
 
-所有生成器遵循统一的品牌规范：
+所有生成器遵循统一的品牌规范，由 **writing-style-standardizer** 提供风格控制：
 
-**语气**：温暖治愈、科学循证、优雅克制
+**风格模式**：
+- 通用科普风格（sample_07参考）
+- 品牌推广风格（sample_06, 08参考）
+- 商业分析风格（sample_01-05参考）
 
-**禁用词汇**：家人们、绝绝子、根治、第一、必需
+**品牌调性**：悟昕（科学循证 + 温暖治愈 + 优雅克制）
 
-**核心卖点**：
-- AI智能睡眠管理师
-- 医疗级EEG脑电监测
-- 监测-干预-反馈闭环
-- FDA认证CES技术
-- 80%医疗级准确率
+**核心要求**：
+- ✅ 标题：15-25字，疑问/亮点式
+- ✅ 开篇：场景化引入，避免无效铺垫
+- ✅ 段落：80-120字，空行分隔
+- ✅ 禁止词：绝绝子、神级、根治、第一等
 
----
-
-## 相关文档
-
-- **使用指南**：`references/使用指南.md`
-- **架构设计**：`references/架构设计.md`
-- **开发文档**：`references/开发文档.md`
+**品牌植入原则**：
+- 超软性："搜「睡眠管理」试试看" 而非 "立即购买"
+- 一次一处：不要堆砌卖点
+- 场景化：在解决方案中自然呈现
 
 ---
 
@@ -220,3 +219,12 @@ python cli.py generate --type script --node "常规投放"
 - **科普图文生成器**：`skills/wuxin-xhs-content/SKILL.md`
 - **公关文章生成器**：`skills/wuxin-pr-article/SKILL.md`
 - **公众号文章生成器**：`skills/wuxin-wechat-article/SKILL.md`
+
+---
+
+## 相关文档
+
+- **风格标准化器**：`skills/writing-style-standardizer/SKILL.md`
+- **使用指南**：`references/使用指南.md`
+- **架构设计**：`references/架构设计.md`
+- **开发文档**：`references/开发文档.md`

@@ -58,6 +58,13 @@ The final PRD must include these sections:
 - **Questions**: Ask in user's language
 - **PRD Output**: Generate in English (unless user requests otherwise)
 
+### 风格参考
+
+生成PRD时可参考 **writing-style-standardizer** 的专业写作风格：
+- 客观专业、数据驱动
+- 结构清晰、层次分明
+- 避免主观臆断，用事实说话
+
 ## Resources
 
 ### references/prd_template.md
