@@ -238,149 +238,71 @@ class EditorialCoverGenerator:
             year_match = re.search(r'(20\d{2})', year or chinese_title)
             year_line = year_match.group(1) if year_match else "2026"
 
-            # 处理第二行和第三行
-            user_lines = chinese_title.split('\n') if '\n' in chinese_title else []
+            # 清理标题内容，用于提取关键词
+            title_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', chinese_title)
+            # 移除开头的年份
+            title_clean = re.sub(r'^20\d{2}', '', title_clean)
 
-            # 过滤掉第一行如果是年份
-            if user_lines and user_lines[0].strip().startswith('20'):
-                user_lines = user_lines[1:]
+            # 定义完整的行业关键词映射（优先匹配长的关键词）
+            industry_keywords = [
+                ("本地生活服务", ["本地生活", "本地生活服务"]),
+                ("短剧行业", ["短剧行业", "短视频短剧"]),
+                ("无人机巢行业", ["无人机巢", "无人机停机坪"]),
+                ("电动出行行业", ["电动出行", "新能源出行", "电动汽车"]),
+                ("汽车市场", ["车市", "汽车市场", "中国车市"]),
+                ("母婴连锁", ["母婴连锁", "母婴行业"]),
+                ("小商品城", ["小商品城", "义乌小商品"]),
+                ("电声行业", ["电声", "音频"]),
+                ("茶饮连锁", ["茶饮", "奶茶", "新茶饮"]),
+                ("化妆品行业", ["化妆品", "防晒", "美妆", "护肤"]),
+                ("食品饮料行业", ["食品饮料", "休闲食品"]),
+                ("消费电子行业", ["消费电子"]),
+                ("小家电行业", ["小家电"]),
+                ("娱乐消费行业", ["娱乐"]),
+                ("地产行业", ["地产"]),
+                ("金融行业", ["金融"]),
+                ("零售行业", ["零售"]),
+                ("电商行业", ["电商"]),
+                ("新能源行业", ["新能源"]),
+                ("人工智能行业", ["人工智能"]),
+                ("半导体行业", ["半导体"]),
+                ("通信行业", ["通信"]),
+                ("服装行业", ["服装"]),
+                ("医药行业", ["医药"]),
+                ("家电行业", ["家电"]),
+            ]
 
-            if len(user_lines) >= 2:
-                # 用户提供了至少2行，直接使用
-                second_line = user_lines[0].strip()
-                third_line = user_lines[1].strip()
-            elif len(user_lines) == 1:
-                # 用户只提供了1行，第二行用用户的，第三行自动生成
-                second_line = user_lines[0].strip()
-                # 根据关键词生成第三行
-                if any(kw in chinese_title for kw in ["品牌", "竞争力", "战略", "布局"]):
-                    third_line = "市场竞争分析报告"
-                elif any(kw in chinese_title for kw in ["趋势", "预测", "增长", "展望"]):
-                    third_line = "消费趋势分析报告"
-                elif any(kw in chinese_title for kw in ["数据", "洞察", "分析", "统计"]):
-                    third_line = "趋势与数据洞察"
-                else:
-                    third_line = "深度研究报告"
-            else:
-                # 没有换行，回退到自动生成逻辑
-                # 清理标题内容（移除emoji、空格等）
-                title_content = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', chinese_title)
-
-                # 从标题中移除开头的年份（避免重复）
-                title_content = re.sub(r'^20\d{2}', '', title_content)
-
-                # 定义行业关键词映射（"爱奇艺"不是行业关键词）
-                industry_keywords = [
-                    ("消费电子行业", ["消费电子"]),
-                    ("食品饮料行业", ["食品饮料", "茶饮", "奶茶", "咖啡", "饮品"]),
-                    ("小家电行业", ["小家电"]),
-                    ("电声行业", ["电声", "音频"]),
-                    ("化妆品行业", ["化妆品", "防晒", "美妆", "护肤"]),
-                    ("娱乐消费行业", ["娱乐"]),
-                    ("母婴行业", ["母婴"]),
-                    ("汽车行业", ["汽车"]),
-                    ("地产行业", ["地产"]),
-                    ("金融行业", ["金融"]),
-                    ("零售行业", ["零售"]),
-                    ("电商行业", ["电商"]),
-                    ("新能源行业", ["新能源"]),
-                    ("人工智能行业", ["人工智能"]),
-                    ("半导体行业", ["半导体"]),
-                    ("通信行业", ["通信"]),
-                    ("服装行业", ["服装"]),
-                    ("医药行业", ["医药"]),
-                    ("家电行业", ["家电"]),
-                ]
-
-                # 匹配行业关键词
-                matched_industry = ""
-                matched_keyword = ""
-                for suffix, keywords in industry_keywords:
-                    for kw in keywords:
-                        if kw in title_content:
-                            matched_industry = suffix
-                            matched_keyword = kw
-                            break
-                    if matched_industry:
+            # 匹配行业关键词（优先匹配长的）
+            matched_industry = ""
+            for industry, keywords in sorted(industry_keywords, key=lambda x: -len(x[0])):
+                for kw in keywords:
+                    if kw in title_clean:
+                        matched_industry = industry
                         break
+                if matched_industry:
+                    break
 
-                if not matched_industry:
-                    matched_industry = "消费行业"  # 默认行业
+            if not matched_industry:
+                matched_industry = "消费行业"  # 默认行业
 
-                # 提取品牌名
-                brand_name = ""
+            # 第二行：行业关键词
+            second_line = matched_industry
 
-                # 定义报告类型/关键词后缀
-                skip_suffixes = [
-                    "品牌", "会员", "运营", "产品", "市场", "报告", "研究", "分析",
-                    "行业", "趋势", "预测", "洞察", "数据", "统计", "竞争力",
-                    "战略", "布局", "发展", "转型", "升级", "深度", "年度"
-                ]
+            # 第三行：根据标题关键词生成报告类型
+            if any(kw in title_clean for kw in ["品牌", "竞争力", "战略", "布局", "商家", "商家趋势"]):
+                third_line = "市场竞争分析报告"
+            elif any(kw in title_clean for kw in ["趋势", "预测", "增长", "展望", "洞察"]):
+                third_line = "消费趋势洞察报告"
+            elif any(kw in title_clean for kw in ["市场", "发展方向", "发展"]):
+                third_line = "市场发展研究报告"
+            elif any(kw in title_clean for kw in ["用户", "忠诚度", "消费者"]):
+                third_line = "用户行为研究报告"
+            elif any(kw in title_clean for kw in ["转型", "转型", "推动"]):
+                third_line = "行业转型研究报告"
+            else:
+                third_line = "行业深度研究报告"
 
-                # 情况1: 行业关键词在标题中间，提取关键词之前的内容作为品牌名
-                if matched_keyword and matched_keyword not in title_content[:3]:
-                    kw_pos = title_content.find(matched_keyword)
-                    potential_brand = title_content[:kw_pos].strip()
-                    # 检查品牌名长度和有效性
-                    prefix_skip_words = ["品牌", "行业", "市场"]
-                    if potential_brand and len(potential_brand) >= 2 and len(potential_brand) <= 6:
-                        if not any(potential_brand.endswith(skip) for skip in prefix_skip_words):
-                            brand_name = potential_brand
-
-                # 情况2: 没有找到行业关键词，尝试从标题开头提取品牌名
-                if not brand_name and not matched_keyword:
-                    # 检查标题是否以跳过词开头（不是品牌报告）
-                    starts_with_skip = any(title_content.startswith(suffix) for suffix in skip_suffixes)
-
-                    if not starts_with_skip:
-                        # 去掉前缀（"中国"、"全球"等）
-                        prefix_skip_words = ["中国", "全球", "年度"]
-                        adjusted_title = title_content
-                        for prefix in prefix_skip_words:
-                            if adjusted_title.startswith(prefix):
-                                adjusted_title = adjusted_title[len(prefix):]
-                                break
-
-                        # 找到第一个跳过词的位置（不排除位置0）
-                        first_skip_pos = len(adjusted_title)
-                        for suffix in skip_suffixes:
-                            pos = adjusted_title.find(suffix)
-                            if pos >= 0 and pos < first_skip_pos:
-                                first_skip_pos = pos
-
-                        # 如果第一个跳过词位置太近（<=2），说明没有明确的品牌名
-                        if first_skip_pos <= 2:
-                            brand_name = ""
-                        else:
-                            # 提取品牌名（跳过词之前的内容），限制最多6个字
-                            if first_skip_pos < len(adjusted_title) and first_skip_pos >= 2:
-                                brand_name = adjusted_title[:min(first_skip_pos, 6)]
-                            elif len(adjusted_title) >= 4 and first_skip_pos == len(adjusted_title):
-                                # 没有找到跳过词，使用前4个字作为品牌名
-                                brand_name = adjusted_title[:4]
-
-                # 组合第二行：品牌名+行业名
-                if brand_name:
-                    second_line = f"{brand_name}{matched_industry}"
-                else:
-                    second_line = matched_industry
-
-                # 特殊处理：茶饮行业用"茶饮连锁"替代"食品饮料行业"
-                if "茶饮" in title_content or "奶茶" in title_content:
-                    second_line = second_line.replace("食品饮料行业", "茶饮连锁")
-                    if not brand_name and "茶饮" in title_content:
-                        second_line = "茶饮连锁"
-
-                # 构建第三行（generic报告类型）
-                third_line = "深度研究报告"
-                if any(kw in title_content for kw in ["品牌", "竞争力", "战略", "布局"]):
-                    third_line = "市场竞争分析报告"
-                elif any(kw in title_content for kw in ["趋势", "预测", "增长", "展望"]):
-                    third_line = "消费趋势分析报告"
-                elif any(kw in title_content for kw in ["数据", "洞察", "分析", "统计"]):
-                    third_line = "趋势与数据洞察"
-
-            # 统一组合标题行（第一行始终是年份）
+            # 统一组合标题行
             title_lines = [year_line, second_line, third_line]
             title_lines_html = "<br>".join(title_lines)
 
