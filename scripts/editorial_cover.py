@@ -270,8 +270,8 @@ class EditorialCoverGenerator:
 
                 # 清理标题内容，用于提取关键词
                 title_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', chinese_title)
-                # 移除开头的年份
-                title_clean = re.sub(r'^20\d{2}', '', title_clean)
+                # 移除所有年份（不只是在开头）
+                title_clean = re.sub(r'20[25]\d{2}', '', title_clean)
 
                 # 放宽关键词匹配规则：从标题中智能提取核心信息（最多8字）
                 # 优先级：1. 用户传入的标题前8字 2. 常见行业关键词 3. 通用后缀
