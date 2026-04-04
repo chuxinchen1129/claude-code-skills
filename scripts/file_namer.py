@@ -321,9 +321,39 @@ def main():
         '--batch', '-b',
         help='批量重命名指定文件夹中的所有PDF文件'
     )
+    parser.add_argument(
+        '--skip-weekend',
+        action='store_true',
+        help='批量重命名时跳过周末（仅限工作日）'
+    )
 
     args = parser.parse_args()
 
+    # 批量重命名模式
+    if args.batch:
+        # 获取开始日期
+        if args.use_today:
+            start_date = None
+        elif args.date:
+            start_date = args.date
+        else:
+            # 交互式输入开始日期
+            print("\n" + "=" * 50)
+            print("批量重命名模式")
+            print("=" * 50)
+            if args.skip_weekend:
+                print("模式: 跳过周末（仅工作日）")
+            start_date = prompt_for_date()
+
+        renamer = PDFRenamer(report_date=start_date)
+        return batch_rename(
+            Path(args.batch),
+            renamer,
+            dry_run=args.dry_run,
+            skip_weekend=args.skip_weekend
+        )
+
+    # 单个文件模式
     # 获取日期
     if args.use_today:
         report_date = None
@@ -334,10 +364,6 @@ def main():
         report_date = prompt_for_date()
 
     renamer = PDFRenamer(report_date=report_date)
-
-    # 批量重命名模式
-    if args.batch:
-        return batch_rename(Path(args.batch), renamer, dry_run=args.dry_run)
 
     # 单个文件重命名模式
     if not args.title:
@@ -362,7 +388,7 @@ def main():
             print(f"  新路径: {result['new_path']}")
 
 
-def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False):
+def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False, skip_weekend: bool = False):
     """
     批量重命名文件夹中的所有PDF文件
 
@@ -370,6 +396,7 @@ def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False):
         folder_path: 文件夹路径
         renamer: PDFRenamer 实例
         dry_run: 是否为试运行
+        skip_weekend: 是否跳过周末（周六、周日）
     """
     if not folder_path.exists():
         print(f"❌ 文件夹不存在: {folder_path}")
@@ -383,8 +410,9 @@ def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False):
         return
 
     print(f"\n找到 {len(pdf_files)} 个PDF文件")
-    print(f"报告日期: {renamer.report_date.strftime('%Y-%m-%d')}")
-    print(f"文件名前缀: {renamer.report_date.strftime('%m%d')}")
+    print(f"开始日期: {renamer.report_date.strftime('%Y-%m-%d')}")
+    if skip_weekend:
+        print(f"模式: 跳过周末（仅工作日）")
     print("-" * 60)
 
     # 创建子文件夹用于重命名后的文件
@@ -394,14 +422,18 @@ def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False):
 
     success_count = 0
     skip_count = 0
+    current_date = renamer.report_date
 
-    for pdf_path in pdf_files:
+    for i, pdf_path in enumerate(pdf_files):
         # 从文件名生成标题（简单处理）
         # 移除扩展名
         base_name = pdf_path.stem
 
+        # 为当前PDF创建独立的 renamer 实例（使用当前日期）
+        current_renamer = PDFRenamer(report_date=current_date.strftime("%Y-%m-%d"))
+
         # 生成新文件名
-        new_name = renamer.generate_filename(base_name)
+        new_name = current_renamer.generate_filename(base_name)
 
         # 构建新路径
         if dry_run:
@@ -410,27 +442,61 @@ def batch_rename(folder_path: Path, renamer: PDFRenamer, dry_run: bool = False):
             new_path = renamed_folder / new_name
 
         # 检查是否已经是标准格式
-        if pdf_path.name.startswith(renamer.report_date.strftime("%m%d")):
+        if pdf_path.name.startswith(current_date.strftime("%m%d")):
             print(f"⊘ 跳过（已是标准格式）: {pdf_path.name}")
             skip_count += 1
-            continue
+        else:
+            # 执行重命名（复制到新文件夹）
+            try:
+                weekday_name = current_date.strftime("%a")
+                if dry_run:
+                    print(f"[试运行] {pdf_path.name} -> {new_name} ({current_date.strftime('%Y-%m-%d')} {weekday_name})")
+                else:
+                    shutil.copy2(pdf_path, new_path)
+                    print(f"✓ {pdf_path.name} -> {new_name} ({current_date.strftime('%Y-%m-%d')} {weekday_name})")
+                success_count += 1
+            except Exception as e:
+                print(f"❌ 失败: {pdf_path.name} - {e}")
 
-        # 执行重命名（复制到新文件夹）
-        try:
-            if dry_run:
-                print(f"[试运行] {pdf_path.name} -> {new_name}")
-            else:
-                shutil.copy2(pdf_path, new_path)
-                print(f"✓ {pdf_path.name} -> {new_name}")
-            success_count += 1
-        except Exception as e:
-            print(f"❌ 失败: {pdf_path.name} - {e}")
+        # 计算下一个PDF的日期（跳过周末）
+        if skip_weekend:
+            # 递增到下一个工作日
+            current_date = _next_workday(current_date)
+        else:
+            # 递增一天
+            current_date = _add_days(current_date, 1)
 
     print("-" * 60)
     print(f"\n批量重命名完成: 成功 {success_count}, 跳过 {skip_count}, 共 {len(pdf_files)}")
 
     if not dry_run:
         print(f"\n重命名后的文件保存在: {renamed_folder}")
+
+
+def _add_days(date: datetime, days: int) -> datetime:
+    """给日期添加指定天数"""
+    from datetime import timedelta
+    return date + timedelta(days=days)
+
+
+def _next_workday(date: datetime) -> datetime:
+    """
+    获取下一个工作日（跳过周六、周日）
+
+    Args:
+        date: 当前日期
+
+    Returns:
+        下一个工作日
+    """
+    from datetime import timedelta
+    next_date = date + timedelta(days=1)
+
+    # 如果是周六（5）或周日（6），继续递增
+    while next_date.weekday() >= 5:
+        next_date = next_date + timedelta(days=1)
+
+    return next_date
 
 
 if __name__ == '__main__':
