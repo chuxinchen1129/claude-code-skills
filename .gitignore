@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 编辑器备份文件
+*.bak
+*.bak2
+*.bak3
+*~
+
+# 截图和生成的图片
+screenshots/
+screenshots_cropped/
+references/
+*.png
+*.jpg
+*.jpeg
+
+# 临时文件
+*.tmp
+*.temp
+temp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
