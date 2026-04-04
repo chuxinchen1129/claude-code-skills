@@ -220,90 +220,60 @@ class EditorialCoverGenerator:
             user_lines = chinese_title.split('\n') if '\n' in chinese_title else []
 
             if len(user_lines) >= 3:
-                # 用户提供了完整的三行，直接使用
+                # 用户提供了完整的三行，直接使用，跳过自动生成
                 title_lines = [line.strip() for line in user_lines[:3]]
             else:
                 # 回退到自动生成逻辑
-                # 清理标题内容（移除emoji、空格等，但保留换行用于分割）
-                title_content = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\n]', '', chinese_title)
-
-                # 提取年份（2026、2025等）作为第一行
-                year_match = re.search(r'(20\d{2})', year or title_content)
+                # 第一行始终是年份（固定）
+                year_match = re.search(r'(20\d{2})', year or chinese_title)
                 year_line = year_match.group(1) if year_match else "2026"
 
-                # 从标题中移除开头的年份（避免重复）
-                title_content = re.sub(r'^20\d{2}', '', title_content)
+                # 清理标题内容，用于提取关键词
+                title_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', chinese_title)
+                # 移除开头的年份
+                title_clean = re.sub(r'^20\d{2}', '', title_clean)
 
-            # 第一行始终是年份（固定）
-            year_match = re.search(r'(20\d{2})', year or chinese_title)
-            year_line = year_match.group(1) if year_match else "2026"
+                # 放宽关键词匹配规则：从标题中智能提取核心信息（最多8字）
+                # 优先级：1. 用户传入的标题前8字 2. 常见行业关键词 3. 通用后缀
+                second_line = ""
 
-            # 清理标题内容，用于提取关键词
-            title_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', chinese_title)
-            # 移除开头的年份
-            title_clean = re.sub(r'^20\d{2}', '', title_clean)
+                # 提取标题中的品牌/品类信息（取前8个字作为第二行）
+                if title_clean:
+                    # 移除常见的报告后缀
+                    suffixes = ["研究报告", "报告", "分析", "洞察", "白皮书", "行业", "产业"]
+                    for suffix in suffixes:
+                        if title_clean.endswith(suffix):
+                            title_clean = title_clean[:-len(suffix)]
+                            break
 
-            # 定义完整的行业关键词映射（优先匹配长的关键词）
-            industry_keywords = [
-                ("本地生活服务", ["本地生活", "本地生活服务"]),
-                ("短剧行业", ["短剧行业", "短视频短剧"]),
-                ("无人机巢行业", ["无人机巢", "无人机停机坪"]),
-                ("电动出行行业", ["电动出行", "新能源出行", "电动汽车"]),
-                ("汽车市场", ["车市", "汽车市场", "中国车市"]),
-                ("母婴连锁", ["母婴连锁", "母婴行业"]),
-                ("小商品城", ["小商品城", "义乌小商品"]),
-                ("电声行业", ["电声", "音频"]),
-                ("茶饮连锁", ["茶饮", "奶茶", "新茶饮"]),
-                ("化妆品行业", ["化妆品", "防晒", "美妆", "护肤"]),
-                ("食品饮料行业", ["食品饮料", "休闲食品"]),
-                ("消费电子行业", ["消费电子"]),
-                ("小家电行业", ["小家电"]),
-                ("娱乐消费行业", ["娱乐"]),
-                ("地产行业", ["地产"]),
-                ("金融行业", ["金融"]),
-                ("零售行业", ["零售"]),
-                ("电商行业", ["电商"]),
-                ("新能源行业", ["新能源"]),
-                ("人工智能行业", ["人工智能"]),
-                ("半导体行业", ["半导体"]),
-                ("通信行业", ["通信"]),
-                ("服装行业", ["服装"]),
-                ("医药行业", ["医药"]),
-                ("家电行业", ["家电"]),
-            ]
+                    # 取前8个字作为第二行（核心品牌/品类）
+                    second_line = title_clean[:8].strip()
 
-            # 匹配行业关键词（优先匹配长的）
-            matched_industry = ""
-            for industry, keywords in sorted(industry_keywords, key=lambda x: -len(x[0])):
-                for kw in keywords:
-                    if kw in title_clean:
-                        matched_industry = industry
-                        break
-                if matched_industry:
-                    break
+                # 如果提取为空，使用通用后缀
+                if not second_line:
+                    second_line = "行业研究"
 
-            if not matched_industry:
-                matched_industry = "消费行业"  # 默认行业
+                # 第三行：智能生成报告类型
+                third_line = "研究报告"  # 默认最简洁
 
-            # 第二行：行业关键词
-            second_line = matched_industry
+                # 根据标题中的关键词优化报告类型
+                if any(kw in chinese_title for kw in ["复兴", "改革", "转型", "焕新"]):
+                    third_line = "复兴报告"
+                elif any(kw in chinese_title for kw in ["趋势", "展望", "预测", "增长"]):
+                    third_line = "趋势报告"
+                elif any(kw in chinese_title for kw in ["竞争", "格局", "排名"]):
+                    third_line = "竞争报告"
+                elif any(kw in chinese_title for kw in ["白皮书"]):
+                    third_line = "白皮书"
+                elif any(kw in chinese_title for kw in ["洞察", "分析"]):
+                    third_line = "洞察报告"
 
-            # 第三行：根据标题关键词生成报告类型
-            if any(kw in title_clean for kw in ["品牌", "竞争力", "战略", "布局", "商家", "商家趋势"]):
-                third_line = "市场竞争分析报告"
-            elif any(kw in title_clean for kw in ["趋势", "预测", "增长", "展望", "洞察"]):
-                third_line = "消费趋势洞察报告"
-            elif any(kw in title_clean for kw in ["市场", "发展方向", "发展"]):
-                third_line = "市场发展研究报告"
-            elif any(kw in title_clean for kw in ["用户", "忠诚度", "消费者"]):
-                third_line = "用户行为研究报告"
-            elif any(kw in title_clean for kw in ["转型", "转型", "推动"]):
-                third_line = "行业转型研究报告"
-            else:
-                third_line = "行业深度研究报告"
+                # 统一组合标题行
+                title_lines = [year_line, second_line, third_line]
+            # 规则：第3行标题长度不超过9个字
+            if len(title_lines) >= 3 and len(title_lines[2]) > 9:
+                title_lines[2] = title_lines[2][:9]
 
-            # 统一组合标题行
-            title_lines = [year_line, second_line, third_line]
             title_lines_html = "<br>".join(title_lines)
 
             # 英文标题转大写
