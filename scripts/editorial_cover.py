@@ -176,6 +176,42 @@ class EditorialCoverGenerator:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+    def _parse_date(self, date_str: Optional[str]) -> datetime:
+        """
+        解析日期字符串
+
+        Args:
+            date_str: 日期字符串，支持格式：
+                      - MMDD (如 "0315")
+                      - YYYY-MM-DD (如 "2026-03-15")
+                      - None (使用当前日期)
+
+        Returns:
+            datetime 对象
+        """
+        if not date_str:
+            return datetime.now()
+
+        # 尝试解析 YYYY-MM-DD 格式
+        if '-' in date_str:
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # 尝试解析 MMDD 格式
+        if len(date_str) == 4 and date_str.isdigit():
+            try:
+                month = int(date_str[:2])
+                day = int(date_str[2:])
+                now = datetime.now()
+                return datetime(now.year, month, day)
+            except ValueError:
+                pass
+
+        # 解析失败，使用当前日期
+        return datetime.now()
+
     def generate_cover(
         self,
         source: str,
@@ -188,6 +224,7 @@ class EditorialCoverGenerator:
         report_type: str = "行业研究报告",
         categories: str = "",
         number: Optional[str] = None,
+        report_date: Optional[str] = None,
         output_filename: Optional[str] = None
     ) -> Dict:
         """
@@ -204,16 +241,19 @@ class EditorialCoverGenerator:
             report_type: 报告类型
             categories: 核心品类（用于网格区中间位置）
             number: 编号（MMDD格式）
+            report_date: 报告日期，格式 YYYY-MM-DD 或 MMDD（默认使用当前日期）
             output_filename: 输出文件名
 
         Returns:
             结果字典
         """
         try:
+            # 解析报告日期
+            now = self._parse_date(report_date)
+
             # 生成编号和日期
             if number is None:
-                number = datetime.now().strftime("%m%d")
-            now = datetime.now()
+                number = now.strftime("%m%d")
             date_full = now.strftime("%Y.%m.%d")
 
             # 保留用户自定义换行，按\n分割成多行
