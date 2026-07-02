@@ -1,15 +1,17 @@
 ---
 name: baogaomiao
-description: 阅读总结多种文档（PDF/Word/PPT/网页），分3步输出：中文标题（2026开头）、英文标题、小红书笔记，生成后自动发送到飞书。支持PDF截图（跳过前2页和最后5页，随机截6张），截图自动发送到飞书手机。每次生成截图时自动清理该PDF的旧截图。**NEW v2.12**：支持指定报告日期重命名PDF、批量重命名跳过周末。
-version: 2.12
+description: 阅读总结多种文档（PDF/Word/PPT/网页），分3步输出：中文标题（2026开头）、英文标题、小红书笔记，生成后自动发送到飞书。支持PDF截图（跳过前2页和最后5页，随机截6张），截图自动发送到飞书手机。每次生成截图时自动清理该PDF的旧截图。**NEW v2.13**：封面渲染约束固化（视口=卡片bounding_box、Tailwind JIT等待、PIL像素校验、CDN本地化），稳定输出无白边。
+version: 2.13
 created: 2026-02-13
-updated: 2026-04-04
+updated: 2026-07-01
 
 ---
 
-# 文档总结 - 小红书笔记生成 v2.12
+# 文档总结 - 小红书笔记生成 v2.13
 
 你是一个高效的文档阅读和内容总结专家，专注于将各类文档转化为吸引人的小红书笔记，**生成后自动发送到飞书**。
+
+**NEW v2.13**：封面渲染约束固化！视口动态读 bounding_box、Tailwind JIT 编译等待、PIL 四角像素校验、CDN 资源全部本地化，封面稳定输出无白边/无白底。
 
 **NEW v2.12**：支持指定报告日期！PDF重命名和封面生成可使用指定日期，批量重命名支持跳过周末。
 
@@ -326,6 +328,33 @@ sender.send_image(str(target_cover))
 2-7. 6张PDF截图
 8. 封面图
 ```
+
+#### 封面渲染约束（v2.13）⭐ NEW
+
+为了保证封面稳定输出（无白边、比例正确、背景色到位），`scripts/html_to_image.py` 与 `scripts/editorial_cover.py` 必须共同遵守以下 5 条硬约束。**修改任一文件前请先核对这 5 条**：
+
+| # | 约束 | 实现位置 | 说明 |
+|---|------|---------|------|
+| 1 | **视口 = 卡片实际 bounding_box** | `html_to_image.py` 关键步骤 1-2 | 视口尺寸不硬编码。先用 1200×1600 加载 HTML，读 `#editorial-card-container.getBoundingClientRect()`，再把视口设成卡片实际尺寸（当前 640×853）。 |
+| 2 | **body 不允许 padding** | `editorial_cover.py` HTML_TEMPLATE | `<body style="margin: 0; padding: 0; width: 640px; height: 853px; overflow: hidden;">`，让视口与卡片完全对齐，消除周围红色边框。 |
+| 3 | **截图前 Tailwind JIT 必须编译完成** | `html_to_image.py` 关键步骤 0 | `page.wait_for_function` 检查 `getComputedStyle(card).backgroundColor === 'rgb(251, 1, 81)'`，超时 15s。未编译会让背景变成白色。 |
+| 4 | **截图后 PIL 校验四角像素** | `html_to_image.py` `_verify_corners()` | 校验 PNG 四角 `(5,5)`、`(w-5,5)`、`(5,h-5)`、`(w-5,h-5)` 均 ≈ `EXPECTED_BG_RGB=(251,1,81)`，容差 `PIXEL_TOLERANCE=12`。任一角不通过即报错（不删图，便于排查）。 |
+| 5 | **本地化所有外部资源** | `scripts/assets/` | Tailwind Play CDN、Font Awesome、Google Fonts（Noto Serif SC / Oswald / Noto Sans SC）必须从本地 `scripts/assets/` 加载，HTML 模板用相对路径 `../assets/js/tailwind.js` 等注入。**禁止 CDN**（断网即失败）。 |
+
+**截图 API 选择**：
+- ✅ 用 `page.screenshot(path=..., full_page=False, scale='device')` —— 截整个视口，与卡片对齐
+- ❌ 不要用 `locator.screenshot()` —— 字体加载超时会让截图失败
+
+**HTML 加载方式**：
+- ✅ `page.goto(html_file.resolve().as_uri(), wait_until='load')` —— 用 file:// 协议加载，浏览器能正确解析 `../assets/...` 相对路径
+- ❌ 不要用 `page.set_content()` + file:// URI —— Chromium 会拒绝从 about:blank 加载本地文件
+
+**像素校验失败排查**：
+| 现象 | 原因 | 处理 |
+|------|------|------|
+| 四角全白 (255,255,255) | Tailwind JIT 没编译 | 检查 `tailwind.js` 是否加载、HTML 是否引入了 `bg-bgBase` |
+| 四角红色但偏暗 | 抗锯齿/缩放 | 容差已设为 12，仍失败可调高 `PIXEL_TOLERANCE` |
+| 仅某角偏色 | 卡片被裁切 | 视口尺寸与 bounding_box 不一致，检查约束 #1 |
 
 ### 新增功能 v2.5
 

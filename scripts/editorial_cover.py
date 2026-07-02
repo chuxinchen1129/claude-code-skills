@@ -21,6 +21,14 @@ class EditorialCoverGenerator:
     MAX_HIGHLIGHT_TITLE_LENGTH = 25  # 摘要标题最多25字
     MAX_SUMMARY_TEXT_LENGTH = 60  # 摘要内容最多60字
 
+    # 本地资源目录（消除 CDN 依赖）
+    ASSETS_DIR = Path(__file__).parent / "assets"
+
+    def _asset_relpath(self, *parts: str) -> str:
+        """资源相对于 output_dir 的 POSIX 相对路径（浏览器双击 HTML 也能加载）。"""
+        rel_assets = os.path.relpath(self.ASSETS_DIR, self.output_dir.resolve())
+        return (Path(rel_assets) / Path(*parts)).as_posix()
+
     # HTML模板（固定3:4比例的紧凑社论风）
     HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -28,9 +36,9 @@ class EditorialCoverGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title} | 紧凑社论风</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@900&family=Oswald:wght@700&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
+    <script src="{tailwind_src}"></script>
+    <link href="{fa_css}" rel="stylesheet">
+    <link href="{google_fonts_css}" rel="stylesheet">
     <style type="text/tailwindcss">
         @layer utilities {{
             .text-shadow-sm {{
@@ -82,7 +90,7 @@ class EditorialCoverGenerator:
         }}
     </script>
 </head>
-<body class="bg-bgBase flex items-center justify-center p-8 font-noto-sans text-textMain" style="min-height: 100vh;">
+<body class="bg-bgBase font-noto-sans text-textMain" style="margin: 0; padding: 0; width: 640px; height: 853px; overflow: hidden;">
     <div id="editorial-card-container" class="rounded-xl overflow-hidden shadow-editorial paper-noise bg-bgBase" style="width: 640px; height: 853px;">
         <div class="content-wrapper p-10 flex flex-col" style="height: 100%; display: flex; flex-direction: column;">
             <!-- Header -->
@@ -248,6 +256,9 @@ class EditorialCoverGenerator:
             结果字典
         """
         try:
+            # 自动去除标题中的年份前缀，避免与year参数重复显示
+            chinese_title = re.sub(r'^(20\d{2})\s*', '', chinese_title)
+
             # 解析报告日期
             now = self._parse_date(report_date)
 
@@ -325,7 +336,7 @@ class EditorialCoverGenerator:
             if len(summary_text) > self.MAX_SUMMARY_TEXT_LENGTH:
                 summary_text = summary_text[:self.MAX_SUMMARY_TEXT_LENGTH]
 
-            # 填充HTML模板
+            # 填充HTML模板（本地资源 URI 动态注入）
             html_content = self.HTML_TEMPLATE.format(
                 title=chinese_title[:30],
                 title_lines=title_lines_html,
@@ -337,7 +348,10 @@ class EditorialCoverGenerator:
                 date_full=date_full,
                 report_type=report_type or "行业研究报告",
                 categories=categories or "-",
-                number=number
+                number=number,
+                tailwind_src=self._asset_relpath('js', 'tailwind.js'),
+                fa_css=self._asset_relpath('css', 'font-awesome.min.css'),
+                google_fonts_css=self._asset_relpath('css', 'google-fonts.css'),
             )
 
             # 生成输出文件名

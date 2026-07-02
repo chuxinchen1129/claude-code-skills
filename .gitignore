@@ -35,6 +35,7 @@ wheels/
 screenshots/
 screenshots_cropped/
 references/
+covers/
 *.png
 *.jpg
 *.jpeg
