@@ -696,7 +696,7 @@ result = sender.send(content, auto_send=True)  # 自动发送
   • 文本笔记发送（3条消息：中文标题、英文标题、笔记）
   • 📷 截图自动发送（6张图片消息）
 ↓
-[步骤5：归档询问]（v2.14 ⭐ NEW）Claude 主动询问用户：
+[步骤5：归档询问]（v2.14 ⭐ NEW）**在 Claude Code 对话里直接问用户**：
   "处理完成。是否将 PDF 移动到报告喵文件夹，并清理本地截图/封面？"
   • 目标目录：~/Library/Mobile Documents/com~apple~CloudDocs/家人共享/报告喵/
   • 用户确认后执行：
@@ -708,6 +708,8 @@ result = sender.send(content, auto_send=True)  # 自动发送
 ```
 
 #### 归档询问硬性规则（v2.14）⭐ IMPORTANT
+
+**询问方式**：**在 Claude Code 对话里直接问，不发飞书消息**。用户在终端回复 yes/no。
 
 **询问时机**：飞书发送成功之后，立刻询问。**不允许跳过询问直接移动/删除**。
 
@@ -725,6 +727,7 @@ result = sender.send(content, auto_send=True)  # 自动发送
 - ❌ 禁止不询问直接移动
 - ❌ 禁止 `rm -rf` 整个 screenshots 目录（会误删其他 PDF 的截图）
 - ❌ 禁止删除 `.pdf` 原始文件（只能 mv）
+- ❌ 禁止通过飞书发送询问消息（询问只在 Claude Code 对话里）
 - ✅ 删除前用 `ls` 列出待删文件让用户可见
 - ✅ 用户拒绝时，所有文件保持原状
 
